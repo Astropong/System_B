@@ -1,0 +1,60 @@
+class_name PowerRules
+extends RefCounted
+## Règles d'alimentation électrique des modules du vaisseau.
+##
+## Elles sont appliquées uniquement par l'hôte, UPDATE_RATE fois par seconde
+## (voir Ship), puis les valeurs sont envoyées aux autres joueurs.
+##
+## Règles actuelles :
+## 1. Le générateur est toujours alimenté de manière optimale.
+## 2. Tout autre module se recharge de CHARGE_SPEED W/s, jusqu'à
+##	MAX_CHARGE_RATIO × son alimentation optimale, dès qu'un module adjacent
+##	est alimenté à au moins MIN_NEIGHBOR_RATIO × sa propre alimentation optimale.
+
+## Nombre de mises à jour de l'alimentation par seconde.
+const UPDATE_RATE := 10.0
+## Vitesse de recharge d'un module (W par seconde).
+const CHARGE_SPEED := 20.0
+## Plafond de recharge, en proportion de l'alimentation optimale (120 %).
+const MAX_CHARGE_RATIO := 1.2
+## Seuil à partir duquel un module alimente ses voisins (50 % de son optimale).
+const MIN_NEIGHBOR_RATIO := 0.5
+
+
+## Applique les règles pour un pas de temps [param delta] (en secondes).
+## [param modules] est la liste des modules dans l'ordre du vaisseau.
+static func update(modules: Array[Module], delta: float) -> void:
+	# Règle 1 : le générateur est toujours à l'optimum.
+	for m in modules:
+		if m.get_type_id() == Module.ModuleType.GENERATEUR:
+			m.power_supplied = m.get_ideal_power()
+
+	# On note d'abord quels modules alimentent leurs voisins, pour que l'ordre
+	# de traitement n'influence pas le résultat.
+	var supplying: Array[bool] = []
+	for m in modules:
+		supplying.append(m.get_power_ratio() >= MIN_NEIGHBOR_RATIO)
+
+	# Règle 2 : recharge progressive à partir d'un voisin suffisamment alimenté.
+	for i in modules.size():
+		var m := modules[i]
+		if m.get_type_id() == Module.ModuleType.GENERATEUR:
+			continue
+		var has_powered_neighbor := false
+		for j in get_neighbor_indices(modules, i):
+			if supplying[j]:
+				has_powered_neighbor = true
+		var cap := m.get_ideal_power() * MAX_CHARGE_RATIO
+		if has_powered_neighbor and m.power_supplied < cap:
+			m.power_supplied = minf(m.power_supplied + CHARGE_SPEED * delta, cap)
+
+
+## Indices des modules adjacents au module [param index].
+## Les modules étant alignés, ce sont le précédent et le suivant.
+static func get_neighbor_indices(modules: Array[Module], index: int) -> Array[int]:
+	var result: Array[int] = []
+	if index > 0:
+		result.append(index - 1)
+	if index < modules.size() - 1:
+		result.append(index + 1)
+	return result

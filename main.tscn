@@ -1,0 +1,112 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://starfield.gd" id="1_starfield"]
+[ext_resource type="Script" path="res://ship.gd" id="2_ship"]
+[ext_resource type="Script" path="res://modules/module_generateur.gd" id="3_generateur"]
+[ext_resource type="Script" path="res://modules/module_reacteur.gd" id="4_reacteur"]
+[ext_resource type="Script" path="res://modules/module_couloir.gd" id="5_couloir"]
+[ext_resource type="Script" path="res://modules/module_pilotage.gd" id="6_pilotage"]
+[ext_resource type="Script" path="res://network.gd" id="7_network"]
+[ext_resource type="Script" path="res://fog_of_war.gd" id="8_fog"]
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_ship"]
+properties/0/path = NodePath(".:position")
+properties/0/spawn = true
+properties/0/replication_mode = 1
+
+[node name="Main" type="Node2D"]
+
+[node name="Background" type="CanvasLayer" parent="."]
+layer = -1
+follow_viewport_enabled = true
+
+[node name="Starfield" type="Node2D" parent="Background"]
+script = ExtResource("1_starfield")
+
+[node name="Ship" type="Node2D" parent="."]
+position = Vector2(576, 324)
+script = ExtResource("2_ship")
+
+[node name="Generateur" type="Node2D" parent="Ship"]
+script = ExtResource("3_generateur")
+
+[node name="Reacteur" type="Node2D" parent="Ship"]
+script = ExtResource("4_reacteur")
+
+[node name="Couloir" type="Node2D" parent="Ship"]
+script = ExtResource("5_couloir")
+
+[node name="Couloir2" type="Node2D" parent="Ship"]
+script = ExtResource("5_couloir")
+
+[node name="Pilotage" type="Node2D" parent="Ship"]
+script = ExtResource("6_pilotage")
+
+[node name="Crew" type="Node2D" parent="Ship"]
+
+[node name="ShipSync" type="MultiplayerSynchronizer" parent="Ship"]
+replication_config = SubResource("SceneReplicationConfig_ship")
+
+[node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("../Ship/Crew")
+
+[node name="Network" type="Node" parent="."]
+script = ExtResource("7_network")
+
+[node name="FogOfWar" type="CanvasModulate" parent="."]
+visible = false
+color = Color(0, 0, 0, 1)
+script = ExtResource("8_fog")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Instructions" type="Label" parent="HUD"]
+offset_left = 16.0
+offset_top = 12.0
+text = "Flèches : se déplacer   |   Clic gauche (ou maintenu) : aller vers la souris   |   Les portes s'ouvrent à l'approche"
+
+[node name="Menu" type="PanelContainer" parent="HUD"]
+unique_name_in_owner = true
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -170.0
+offset_top = -130.0
+offset_right = 170.0
+offset_bottom = 130.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Margin" type="MarginContainer" parent="HUD/Menu"]
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="VBox" type="VBoxContainer" parent="HUD/Menu/Margin"]
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="HUD/Menu/Margin/VBox"]
+text = "System B - Multijoueur"
+horizontal_alignment = 1
+
+[node name="HostButton" type="Button" parent="HUD/Menu/Margin/VBox"]
+unique_name_in_owner = true
+text = "Héberger une partie"
+
+[node name="Address" type="LineEdit" parent="HUD/Menu/Margin/VBox"]
+unique_name_in_owner = true
+text = "127.0.0.1"
+placeholder_text = "Adresse de l'hôte"
+
+[node name="JoinButton" type="Button" parent="HUD/Menu/Margin/VBox"]
+unique_name_in_owner = true
+text = "Rejoindre"
+
+[node name="Status" type="Label" parent="HUD/Menu/Margin/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(300, 0)
+horizontal_alignment = 1
+autowrap_mode = 3
