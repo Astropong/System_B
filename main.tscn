@@ -55,7 +55,7 @@ script = ExtResource("7_network")
 
 [node name="FogOfWar" type="CanvasModulate" parent="."]
 visible = false
-color = Color(0, 0, 0, 1)
+color = Color(0.25, 0.25, 0.25, 1)
 script = ExtResource("8_fog")
 
 [node name="HUD" type="CanvasLayer" parent="."]

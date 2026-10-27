@@ -42,6 +42,22 @@ const BATTERY_EMPTY_COLOR := Color(0.08, 0.09, 0.1)
 const BATTERY_OK_COLOR := Color(0.3, 0.9, 0.4)
 const BATTERY_OVERLOAD_COLOR := Color(0.95, 0.25, 0.2)
 
+## Éclairage de la salle selon l'alimentation (voir _update_lighting).
+const LIGHT_LOW_COLOR := Color(1.0, 0.3, 0.25)        # sous le minimum : rouge
+const LIGHT_NORMAL_COLOR := Color.WHITE
+const LIGHT_OVERLOAD_COLOR := Color(1.0, 0.82, 0.6)   # au-delà de l'optimum : orangé
+const LIGHT_LOW_INTENSITY := 0.5
+const LIGHT_DEGRADED_MIN_INTENSITY := 0.5
+const LIGHT_DEGRADED_MAX_INTENSITY := 0.9
+## Écart (W) en dessous duquel l'alimentation est considérée comme optimale.
+const POWER_TOLERANCE := 0.5
+## Nombre moyen de clignotements par seconde, près du minimum et près de l'optimum.
+const FLICKER_RATE_NEAR_MIN := 3.0
+const FLICKER_RATE_NEAR_OPTIMAL := 0.8
+## Lampes : position (retrait depuis les coins) et taille.
+const LAMP_INSET := 24.0
+const LAMP_RADIUS := 6.0
+
 ## Taille (px) de la boîte de référence dans laquelle chaque type dessine
 ## son schéma ; le dessin est ensuite agrandi pour remplir la salle.
 const DETAILS_REFERENCE := 240.0
@@ -65,6 +81,11 @@ const DETAILS_REFERENCE := 240.0
 	set(value):
 		state = clampf(value, 0.0, 1.0)
 		queue_redraw()
+
+var _lamps: Node2D
+var _light_color: Color = Color.WHITE
+var _flicker_time_left: float = 0.0
+var _flicker_factor: float = 1.0
 
 ## Ouvertures pour une porte dans les murs gauche et droit (réglées par le vaisseau).
 @export var door_left: bool = true:
@@ -92,6 +113,12 @@ const DETAILS_REFERENCE := 240.0
 @abstract func get_possible_failures() -> Array[StringName]
 
 
+## Alimentation minimale de fonctionnement (W) : par défaut la moitié de
+## l'alimentation optimale. Une classe fille peut la redéfinir.
+func get_min_power() -> float:
+	return get_ideal_power() * 0.5
+
+
 # --- Méthodes communes -------------------------------------------------------
 
 func get_type_name() -> String:
@@ -103,10 +130,85 @@ func get_pixel_size() -> Vector2:
 	return Vector2(get_size()) * CELL_SIZE
 
 
+func _ready() -> void:
+	if Engine.is_editor_hint():
+		return
+	# Lampes dessinées par un nœud enfant, pour ne redessiner qu'elles.
+	_lamps = Node2D.new()
+	_lamps.name = "Lamps"
+	_lamps.draw.connect(_draw_lamps)
+	add_child(_lamps)
+
+
+func _process(delta: float) -> void:
+	if Engine.is_editor_hint():
+		return
+	_update_lighting(delta)
+
+
 ## Rapport puissance fournie / puissance idéale (1 = alimentation parfaite).
 func get_power_ratio() -> float:
 	var ideal := get_ideal_power()
 	return 1.0 if ideal <= 0.0 else power_supplied / ideal
+
+
+## Éclairage selon l'alimentation :
+## - sous le minimum : rouge, à 50 % ;
+## - entre le minimum et l'optimum : blanc, de 50 % à 90 %, avec clignotements ;
+## - à l'optimum : blanc, à 100 %, stable ;
+## - au-delà de l'optimum : légèrement orangé, à 100 %.
+## L'éclairage teinte le dessin de la salle (self_modulate) et ses lampes ;
+## les personnages et les portes ne sont pas affectés.
+func _update_lighting(delta: float) -> void:
+	var power := power_supplied
+	var optimal := get_ideal_power()
+	var minimum := get_min_power()
+	var color := LIGHT_NORMAL_COLOR
+	var intensity := 1.0
+	var flickering := false
+	var progress := 1.0
+
+	if power < minimum:
+		color = LIGHT_LOW_COLOR
+		intensity = LIGHT_LOW_INTENSITY
+	elif power < optimal - POWER_TOLERANCE:
+		progress = inverse_lerp(minimum, optimal, power)
+		intensity = lerpf(LIGHT_DEGRADED_MIN_INTENSITY, LIGHT_DEGRADED_MAX_INTENSITY, progress)
+		flickering = true
+	elif power > optimal + POWER_TOLERANCE:
+		color = LIGHT_OVERLOAD_COLOR
+
+	# Clignotements : de brèves baisses de lumière, plus fréquentes près du minimum.
+	if flickering:
+		if _flicker_time_left > 0.0:
+			_flicker_time_left -= delta
+		elif randf() < lerpf(FLICKER_RATE_NEAR_MIN, FLICKER_RATE_NEAR_OPTIMAL, progress) * delta:
+			_flicker_time_left = randf_range(0.04, 0.15)
+			_flicker_factor = randf_range(0.45, 0.8)
+	if not flickering or _flicker_time_left <= 0.0:
+		_flicker_factor = 1.0
+
+	var lit := Color(color.r * intensity * _flicker_factor, color.g * intensity * _flicker_factor,
+			color.b * intensity * _flicker_factor)
+	if lit != _light_color:
+		_light_color = lit
+		self_modulate = lit
+		if _lamps:
+			_lamps.queue_redraw()
+
+
+## Petites lampes dans les coins de la salle, de la couleur de l'éclairage.
+func _draw_lamps() -> void:
+	var size := get_pixel_size()
+	for corner in [Vector2(LAMP_INSET, LAMP_INSET), Vector2(size.x - LAMP_INSET, LAMP_INSET),
+			Vector2(LAMP_INSET, size.y - LAMP_INSET), Vector2(size.x - LAMP_INSET, size.y - LAMP_INSET)]:
+		var halo := _light_color
+		halo.a = 0.12
+		_lamps.draw_circle(corner, LAMP_RADIUS * 4.0, halo)
+		halo.a = 0.25
+		_lamps.draw_circle(corner, LAMP_RADIUS * 2.2, halo)
+		_lamps.draw_circle(corner, LAMP_RADIUS, _light_color)
+		_lamps.draw_arc(corner, LAMP_RADIUS, 0.0, TAU, 16, WALL_COLOR.darkened(0.3), 1.5)
 
 
 ## Murs du module sous forme de segments [début, fin] en coordonnées locales,
@@ -156,7 +258,9 @@ func _draw() -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(0, 48), get_type_name(),
 			HORIZONTAL_ALIGNMENT_CENTER, size.x, 28, TEXT_COLOR)
 
-	_draw_battery()
+	# Jauge d'alimentation : uniquement en mode débogage (voir debug_mode.gd).
+	if DebugMode.is_enabled():
+		_draw_battery()
 
 
 ## Jauge verticale de l'alimentation : pleine et verte à l'alimentation

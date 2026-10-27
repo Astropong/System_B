@@ -8,8 +8,9 @@ extends RefCounted
 ## Règles actuelles :
 ## 1. Le générateur est toujours alimenté de manière optimale.
 ## 2. Tout autre module se recharge de CHARGE_SPEED W/s, jusqu'à
-##	MAX_CHARGE_RATIO × son alimentation optimale, dès qu'un module adjacent
-##	est alimenté à au moins MIN_NEIGHBOR_RATIO × sa propre alimentation optimale.
+##    MAX_CHARGE_RATIO × son alimentation optimale, dès qu'un module adjacent
+##    a atteint sa propre alimentation minimale de fonctionnement
+##    (Module.get_min_power()).
 
 ## Nombre de mises à jour de l'alimentation par seconde.
 const UPDATE_RATE := 10.0
@@ -17,8 +18,6 @@ const UPDATE_RATE := 10.0
 const CHARGE_SPEED := 20.0
 ## Plafond de recharge, en proportion de l'alimentation optimale (120 %).
 const MAX_CHARGE_RATIO := 1.2
-## Seuil à partir duquel un module alimente ses voisins (50 % de son optimale).
-const MIN_NEIGHBOR_RATIO := 0.5
 
 
 ## Applique les règles pour un pas de temps [param delta] (en secondes).
@@ -29,11 +28,12 @@ static func update(modules: Array[Module], delta: float) -> void:
 		if m.get_type_id() == Module.ModuleType.GENERATEUR:
 			m.power_supplied = m.get_ideal_power()
 
-	# On note d'abord quels modules alimentent leurs voisins, pour que l'ordre
-	# de traitement n'influence pas le résultat.
+	# On note d'abord quels modules alimentent leurs voisins (ceux qui ont atteint
+	# leur alimentation minimale), pour que l'ordre de traitement n'influence pas
+	# le résultat.
 	var supplying: Array[bool] = []
 	for m in modules:
-		supplying.append(m.get_power_ratio() >= MIN_NEIGHBOR_RATIO)
+		supplying.append(m.power_supplied >= m.get_min_power())
 
 	# Règle 2 : recharge progressive à partir d'un voisin suffisamment alimenté.
 	for i in modules.size():

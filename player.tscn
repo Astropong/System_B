@@ -36,6 +36,7 @@ position_smoothing_enabled = true
 
 [node name="VisionLight" type="PointLight2D" parent="."]
 enabled = false
+energy = 0.75
 shadow_enabled = true
 texture = SubResource("GradientTexture2D_light")
 texture_scale = 16.0

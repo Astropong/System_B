@@ -6,6 +6,11 @@ extends Node
 ## chaque joueur fait autorité sur son propre personnage.
 ## Lancement automatique possible avec les arguments --host ou --join
 ## (--join=192.168.1.20 pour une autre adresse que 127.0.0.1).
+##
+## Serveur dédié : avec l'étiquette de fonctionnalité « dedicated_server »
+## (export en mode « Serveur dédié », ou étiquette ajoutée à une instance de
+## lancement dans l'éditeur), le jeu crée la partie automatiquement, sans
+## menu et sans personnage pour lui-même. À lancer de préférence avec --headless.
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
@@ -33,6 +38,10 @@ func _ready() -> void:
 	multiplayer.connection_failed.connect(_on_connection_failed)
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
 
+	if OS.has_feature("dedicated_server"):
+		start_dedicated_server.call_deferred()
+		return
+
 	for arg in OS.get_cmdline_args() + OS.get_cmdline_user_args():
 		if arg == "--host":
 			host.call_deferred()
@@ -41,18 +50,33 @@ func _ready() -> void:
 			join.call_deferred(address)
 
 
-## Crée la partie sur cette machine.
+## Crée la partie sur cette machine, en y jouant.
 func host() -> void:
-	var peer := ENetMultiplayerPeer.new()
-	var error := peer.create_server(DEFAULT_PORT, MAX_PLAYERS)
-	if error != OK:
+	if not _create_server():
 		_status.text = "Impossible d'héberger : le port %d est peut-être déjà utilisé." % DEFAULT_PORT
 		return
+	_spawn_player(1)
+	_menu.hide()
+
+
+## Crée la partie sans y jouer (serveur dédié).
+func start_dedicated_server() -> void:
+	_menu.hide()
+	if not _create_server():
+		printerr("Serveur dédié : impossible d'écouter sur le port %d." % DEFAULT_PORT)
+		get_tree().quit(1)
+		return
+	print("Serveur dédié démarré sur le port %d (%d joueurs max)." % [DEFAULT_PORT, MAX_PLAYERS])
+
+
+func _create_server() -> bool:
+	var peer := ENetMultiplayerPeer.new()
+	if peer.create_server(DEFAULT_PORT, MAX_PLAYERS) != OK:
+		return false
 	multiplayer.multiplayer_peer = peer
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
-	_spawn_player(1)
-	_menu.hide()
+	return true
 
 
 ## Rejoint une partie hébergée à l'adresse donnée.
@@ -93,11 +117,13 @@ func _set_buttons_disabled(disabled: bool) -> void:
 # --- Côté hôte ---------------------------------------------------------------
 
 func _on_peer_connected(peer_id: int) -> void:
+	print("Joueur %d connecté." % peer_id)
 	_spawn_player(peer_id)
 	_ship.send_door_states(peer_id)
 
 
 func _on_peer_disconnected(peer_id: int) -> void:
+	print("Joueur %d déconnecté." % peer_id)
 	var player := _crew.get_node_or_null(str(peer_id))
 	if player:
 		player.queue_free()
