@@ -26,8 +26,21 @@ const CELL_SIZE := 48.0
 ## Largeur de l'ouverture d'une porte entre deux modules (2 cases).
 const DOOR_SIZE := CELL_SIZE * 2.0
 
-const TEMPERATURE_MIN := 0.0
-const TEMPERATURE_MAX := 500.0
+## Bornes de la température (°C) : du zéro absolu à 227 °C (500 K).
+const TEMPERATURE_MIN := -273
+const TEMPERATURE_MAX := 227
+
+## Effets visuels de température (voir _update_climate_effects).
+## Déformation par la chaleur au-dessus de HEAT_THRESHOLD (°C), pleine à HEAT_FULL.
+const HEAT_THRESHOLD := 40
+const HEAT_FULL := 100
+## Gel en dessous de FROST_THRESHOLD (°C), plein à FROST_FULL.
+const FROST_THRESHOLD := 10
+const FROST_FULL := -20
+## Intensité d'un effet dès que son seuil est franchi (0–1).
+const CLIMATE_EFFECT_MIN_STRENGTH := 0.3
+const HEAT_SHADER := preload("res://modules/heat_haze.gdshader")
+const FROST_SHADER := preload("res://modules/frost.gdshader")
 
 const FLOOR_COLOR := Color(0.16, 0.17, 0.2)
 const GRID_COLOR := Color(1, 1, 1, 0.05)
@@ -71,10 +84,12 @@ const DETAILS_REFERENCE := 240.0
 		power_supplied = maxf(value, 0.0)
 		queue_redraw()
 
-## Température du module (K), bornée entre 0 et 500.
-@export_range(0.0, 500.0, 0.1, "suffix:K") var temperature: float = 293.0:
+## Température du module (°C, entier), bornée entre TEMPERATURE_MIN et TEMPERATURE_MAX.
+@export_range(-273, 227, 1, "suffix:°C") var temperature: int = 0:
 	set(value):
-		temperature = clampf(value, TEMPERATURE_MIN, TEMPERATURE_MAX)
+		temperature = clampi(value, TEMPERATURE_MIN, TEMPERATURE_MAX)
+		_update_climate_effects()
+		queue_redraw()
 
 ## État du module : 1 = intact, 0 = détruit.
 @export_range(0.0, 1.0, 0.01) var state: float = 1.0:
@@ -86,6 +101,8 @@ var _lamps: Node2D
 var _light_color: Color = Color.WHITE
 var _flicker_time_left: float = 0.0
 var _flicker_factor: float = 1.0
+var _heat_effect: Node2D
+var _frost_effect: Node2D
 
 ## Ouvertures pour une porte dans les murs gauche et droit (réglées par le vaisseau).
 @export var door_left: bool = true:
@@ -138,6 +155,7 @@ func _ready() -> void:
 	_lamps.name = "Lamps"
 	_lamps.draw.connect(_draw_lamps)
 	add_child(_lamps)
+	_create_climate_effects()
 
 
 func _process(delta: float) -> void:
@@ -209,6 +227,56 @@ func _draw_lamps() -> void:
 		_lamps.draw_circle(corner, LAMP_RADIUS * 2.2, halo)
 		_lamps.draw_circle(corner, LAMP_RADIUS, _light_color)
 		_lamps.draw_arc(corner, LAMP_RADIUS, 0.0, TAU, 16, WALL_COLOR.darkened(0.3), 1.5)
+
+
+## Crée les calques des effets de chaleur et de gel, posés sur la salle
+## (sous les personnages et les portes, dessinés après les modules).
+func _create_climate_effects() -> void:
+	var rect := Rect2(Vector2.ZERO, get_pixel_size())
+
+	# La déformation lit l'écran déjà dessiné : une copie de l'arrière-plan
+	# juste avant elle garantit que la salle elle-même y figure. Copie de tout
+	# l'écran : en mode rectangle, la zone copiée ne suit pas la mise à
+	# l'échelle de la fenêtre et laisse des bandes noires.
+	var backbuffer := BackBufferCopy.new()
+	backbuffer.name = "HeatBackBuffer"
+	backbuffer.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT
+	add_child(backbuffer)
+
+	_heat_effect = _create_effect_layer("HeatEffect", HEAT_SHADER, rect)
+	_frost_effect = _create_effect_layer("FrostEffect", FROST_SHADER, rect)
+	_update_climate_effects()
+
+
+func _create_effect_layer(layer_name: String, shader: Shader, rect: Rect2) -> Node2D:
+	var shader_material := ShaderMaterial.new()
+	shader_material.shader = shader
+	shader_material.set_shader_parameter("room_size", rect.size)
+	var layer := Node2D.new()
+	layer.name = layer_name
+	layer.material = shader_material
+	layer.visible = false
+	layer.draw.connect(func() -> void: layer.draw_rect(rect, Color.WHITE))
+	add_child(layer)
+	return layer
+
+
+## Affiche la déformation par la chaleur au-dessus de HEAT_THRESHOLD et le gel
+## en dessous de FROST_THRESHOLD, d'autant plus marqués que l'écart est grand.
+func _update_climate_effects() -> void:
+	if _heat_effect == null:
+		return
+	_set_effect_strength(_heat_effect, temperature > HEAT_THRESHOLD,
+			inverse_lerp(HEAT_THRESHOLD, HEAT_FULL, temperature))
+	_set_effect_strength(_frost_effect, temperature < FROST_THRESHOLD,
+			inverse_lerp(FROST_THRESHOLD, FROST_FULL, temperature))
+
+
+func _set_effect_strength(layer: Node2D, active: bool, progress: float) -> void:
+	layer.visible = active
+	if active:
+		var strength := lerpf(CLIMATE_EFFECT_MIN_STRENGTH, 1.0, clampf(progress, 0.0, 1.0))
+		(layer.material as ShaderMaterial).set_shader_parameter("strength", strength)
 
 
 ## Murs du module sous forme de segments [début, fin] en coordonnées locales,
@@ -293,6 +361,8 @@ func _draw_battery() -> void:
 			HORIZONTAL_ALIGNMENT_CENTER, text_w, 16, TEXT_COLOR)
 	draw_string(font, Vector2(text_x, rect.end.y + 40), "opt. %d W" % roundi(get_ideal_power()),
 			HORIZONTAL_ALIGNMENT_CENTER, text_w, 13, TEXT_COLOR.darkened(0.3))
+	draw_string(font, Vector2(text_x, rect.end.y + 60), "%d °C" % temperature,
+			HORIZONTAL_ALIGNMENT_CENTER, text_w, 16, TEXT_COLOR)
 
 
 ## Dessin schématique propre à chaque type (facultatif à surcharger).

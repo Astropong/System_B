@@ -36,6 +36,8 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 | `ship.gd` | `Ship` : aligne les modules, génère murs/ombres/portes, avance, applique l'alimentation |
 | `door.gd` | `Door` : porte coulissante entre deux modules |
 | `power_rules.gd` | `PowerRules` : règles d'alimentation électrique |
+| `temperature_rules.gd` | `TemperatureRules` : règles de température |
+| `modules/heat_haze.gdshader` / `frost.gdshader` | Effets de chaleur et de gel des salles |
 | `player.gd` / `player.tscn` | Personnage (rond), caméra et lumière de vision |
 | `network.gd` | Réseau ENet : menu, connexion, apparition des joueurs, serveur dédié |
 | `fog_of_war.gd` | `CanvasModulate` du brouillard de guerre (activé en jeu seulement) |
@@ -49,7 +51,8 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
   `get_type_id()`, `get_ideal_power()` (W), `get_size()` (cases),
   `get_possible_failures()` (vide pour l'instant). `get_min_power()` vaut par défaut
   la moitié de l'optimale et peut être redéfinie.
-- **Valeurs d'instance** : `power_supplied` (W), `temperature` (K, 0–500), `state` (0–1).
+- **Valeurs d'instance** : `power_supplied` (W), `temperature` (°C, entier, −273 à 227),
+  `state` (0–1).
 - Tailles actuelles : 16×16, sauf Couloir 8×16. Un type peut apparaître plusieurs fois.
 - Dessin : sol quadrillé, schéma du type (`_draw_details`, dans une boîte de référence
   240×240 agrandie), murs avec ouvertures, nom, jauge de batterie (debug seulement).
@@ -75,6 +78,16 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 - Règle 2 : tout autre module gagne 20 W/s, jusqu'à 120 % de son optimum, si un voisin
   a atteint sa propre alimentation minimale. Sans voisin alimenté, il garde sa charge.
 - Voisins = module précédent et suivant (modules alignés).
+- Envoyée avec les températures dans le RPC `Ship._receive_modules_state`.
+
+### Température (`temperature_rules.gd`)
+- Appliquée par l'hôte juste après l'alimentation.
+- Règle 1 : tout module est à 0 °C par défaut.
+- Règle 2 : +1 °C par tranche de 10 W d'alimentation (`0 + floor(W / 10)`).
+- Effets visuels (calques enfants du module, créés dans `_create_climate_effects`) :
+  au-dessus de 40 °C, déformation par la chaleur (lit l'écran via un `BackBufferCopy`,
+  `unshaded` pour ne pas réassombrir) ; en dessous de 10 °C, givre depuis les murs.
+  Intensité croissante jusqu'à 100 °C / −20 °C.
 
 ### Portes (`door.gd`)
 - S'ouvrent quand un `CharacterBody2D` entre dans leur zone de détection, restent
@@ -107,6 +120,7 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
   côté serveur si le jeu devient public.
 - Pas de calcul d'itinéraire : un clic hors de l'axe d'une porte fait buter contre le mur.
 - Pannes des modules à définir (`get_possible_failures`).
-- Température et état des modules pas encore utilisés par les règles.
+- État des modules pas encore utilisé par les règles ; la température n'a encore
+  qu'un effet visuel.
 - Mobilier des salles agrandi proportionnellement : certains éléments paraissent
   surdimensionnés.

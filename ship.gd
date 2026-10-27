@@ -10,7 +10,8 @@ extends Node2D
 ## Multijoueur : seul l'hôte fait avancer le vaisseau ; sa position est
 ## transmise aux autres joueurs par le nœud ShipSync.
 ## L'hôte applique aussi les règles d'alimentation (voir power_rules.gd)
-## PowerRules.UPDATE_RATE fois par seconde et envoie le résultat aux autres.
+## PowerRules.UPDATE_RATE fois par seconde, puis les règles de température
+## (voir temperature_rules.gd), et envoie le résultat aux autres.
 
 ## Vitesse d'avancée du vaisseau vers la droite, en pixels par seconde
 ## (1 case = 48 px).
@@ -42,19 +43,24 @@ func _update_power(delta: float) -> void:
 	while _power_timer >= step:
 		_power_timer -= step
 		PowerRules.update(modules, step)
+	TemperatureRules.update(modules)
 
 	# Un seul petit message pour tous les modules.
-	var values := PackedFloat32Array()
+	var power := PackedFloat32Array()
+	var temperatures := PackedInt32Array()
 	for m in modules:
-		values.append(m.power_supplied)
-	_receive_power.rpc(values)
+		power.append(m.power_supplied)
+		temperatures.append(m.temperature)
+	_receive_modules_state.rpc(power, temperatures)
 
 
 @rpc("authority", "call_remote", "unreliable_ordered")
-func _receive_power(values: PackedFloat32Array) -> void:
+func _receive_modules_state(power: PackedFloat32Array, temperatures: PackedInt32Array) -> void:
 	var modules := get_modules()
-	for i in mini(values.size(), modules.size()):
-		modules[i].power_supplied = values[i]
+	for i in mini(power.size(), modules.size()):
+		modules[i].power_supplied = power[i]
+	for i in mini(temperatures.size(), modules.size()):
+		modules[i].temperature = temperatures[i]
 
 
 func get_modules() -> Array[Module]:
