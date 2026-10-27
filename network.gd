@@ -119,7 +119,13 @@ func _set_buttons_disabled(disabled: bool) -> void:
 func _on_peer_connected(peer_id: int) -> void:
 	print("Joueur %d connecté." % peer_id)
 	_spawn_player(peer_id)
+	# État courant envoyé au nouveau venu : vaisseau, portes et personnages
+	# (ceux-ci ne sont transmis qu'à chaque changement d'ordre).
+	_ship.send_motion_to(peer_id)
 	_ship.send_door_states(peer_id)
+	for player in _crew.get_children():
+		if player is Player and player.name != str(peer_id):
+			player.send_state_to(peer_id)
 
 
 func _on_peer_disconnected(peer_id: int) -> void:

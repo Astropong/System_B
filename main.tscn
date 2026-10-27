@@ -9,11 +9,6 @@
 [ext_resource type="Script" path="res://network.gd" id="7_network"]
 [ext_resource type="Script" path="res://fog_of_war.gd" id="8_fog"]
 
-[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_ship"]
-properties/0/path = NodePath(".:position")
-properties/0/spawn = true
-properties/0/replication_mode = 1
-
 [node name="Main" type="Node2D"]
 
 [node name="Background" type="CanvasLayer" parent="."]
@@ -43,9 +38,6 @@ script = ExtResource("5_couloir")
 script = ExtResource("6_pilotage")
 
 [node name="Crew" type="Node2D" parent="Ship"]
-
-[node name="ShipSync" type="MultiplayerSynchronizer" parent="Ship"]
-replication_config = SubResource("SceneReplicationConfig_ship")
 
 [node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
 spawn_path = NodePath("../Ship/Crew")

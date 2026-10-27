@@ -17,11 +17,6 @@ fill = 1
 fill_from = Vector2(0.5, 0.5)
 fill_to = Vector2(1, 0.5)
 
-[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_player"]
-properties/0/path = NodePath(".:position")
-properties/0/spawn = false
-properties/0/replication_mode = 1
-
 [node name="Player" type="CharacterBody2D"]
 z_index = 1
 motion_mode = 1
@@ -40,6 +35,3 @@ energy = 0.75
 shadow_enabled = true
 texture = SubResource("GradientTexture2D_light")
 texture_scale = 16.0
-
-[node name="Sync" type="MultiplayerSynchronizer" parent="."]
-replication_config = SubResource("SceneReplicationConfig_player")

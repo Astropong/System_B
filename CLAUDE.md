@@ -12,115 +12,112 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 - 1 case = **48 px** = diamètre du personnage (`Module.CELL_SIZE`). Les tailles se
   raisonnent en cases.
 - Valeurs réglables regroupées en constantes en haut des fichiers, ou en `@export`.
+  Ce fichier cite leurs **noms** : lire la valeur dans le code.
 
 ## Lancer et tester
 
-- Scène principale : `main.tscn`. Au lancement, un menu propose **Héberger** ou
-  **Rejoindre** (adresse par défaut `127.0.0.1`, port UDP **7777**).
-- Arguments de lancement reconnus : `--host`, `--join`, `--join=<ip>`, `--release`.
-- Serveur dédié : étiquette de fonctionnalité `dedicated_server` (export en mode
-  « Serveur dédié », ou étiquette ajoutée à une instance de lancement), de préférence
-  avec `--headless`. Il crée la partie sans menu ni personnage.
-- Test multijoueur local : menu Débogage → personnalisation des instances de lancement,
+- Scène principale : `main.tscn`. Menu **Héberger** / **Rejoindre** (adresse par
+  défaut `127.0.0.1`, port UDP 7777).
+- Arguments : `--host`, `--join`, `--join=<ip>`, `--release` (désactive le mode debug).
+- Serveur dédié : étiquette de fonctionnalité `dedicated_server`, de préférence avec
+  `--headless`. Il crée la partie sans menu ni personnage.
+- Dans l'éditeur : menu Débogage → personnalisation des instances de lancement,
   2 instances (`--host` / `--join`) ou 3 (serveur dédié + 2 × `--join`).
-- Pas de tests automatisés pour l'instant : vérifier en jeu, à deux instances pour
-  tout ce qui touche au réseau.
 
-## Structure
-
-| Fichier | Rôle |
-|---|---|
-| `main.tscn` | Scène principale : fond, vaisseau, réseau, brouillard, HUD/menu |
-| `modules/module.gd` | Classe abstraite `Module` (`@abstract`) |
-| `modules/module_*.gd` | Un fichier par type : Pilotage, Infirmerie, Reacteur, Couloir, Radar, Generateur |
-| `ship.gd` | `Ship` : aligne les modules, génère murs/ombres/portes, avance, applique l'alimentation |
-| `door.gd` | `Door` : porte coulissante entre deux modules |
-| `power_rules.gd` | `PowerRules` : règles d'alimentation électrique |
-| `temperature_rules.gd` | `TemperatureRules` : règles de température |
-| `modules/heat_haze.gdshader` / `frost.gdshader` | Effets de chaleur et de gel des salles |
-| `player.gd` / `player.tscn` | Personnage (rond), caméra et lumière de vision |
-| `network.gd` | Réseau ENet : menu, connexion, apparition des joueurs, serveur dédié |
-| `fog_of_war.gd` | `CanvasModulate` du brouillard de guerre (activé en jeu seulement) |
-| `starfield.gd` | Fond étoilé infini par tuiles, sur un calque séparé |
-| `debug_mode.gd` | `DebugMode.is_enabled()` : affichages réservés au développement |
+### Vérifier sans l'éditeur
+- Exécutable : `B:\Programmes\Godot\Godot_v4.7.2-stable_win64_console.exe`.
+- Pas de Python sur la machine ; Git Bash et PowerShell disponibles.
+- Erreurs de script / nouvelle `class_name` : `<godot> --headless --path . --import`.
+- Lancement court : `<godot> --path . --host --quit-after 900` (avec rendu, pour
+  compiler les shaders).
+- Tests scriptés : un `SceneTree` passé par `--script <fichier.gd> -- --host` charge
+  `main.tscn`, agit sur les nœuds et peut enregistrer des captures
+  (`root.get_texture().get_image().save_png(...)`). Garder ces scripts hors du dépôt.
+- Réseau : un hôte et un client `--headless` lancés à quelques secondes d'écart ;
+  trafic lu avec `ENetConnection.pop_statistic(HOST_TOTAL_SENT_DATA, ...)`.
+- Pas de tests automatisés : vérifier aussi en jeu, à deux instances pour tout ce
+  qui touche au réseau.
 
 ## Architecture
 
-### Modules (`modules/module.gd`)
-- **Caractéristiques du type** (méthodes à fournir par chaque classe fille) :
-  `get_type_id()`, `get_ideal_power()` (W), `get_size()` (cases),
-  `get_possible_failures()` (vide pour l'instant). `get_min_power()` vaut par défaut
-  la moitié de l'optimale et peut être redéfinie.
-- **Valeurs d'instance** : `power_supplied` (W), `temperature` (°C, entier, −273 à 227),
+### Modules — `modules/module.gd`, `modules/module_*.gd`
+- `Module` est abstraite (`@abstract`) ; un fichier par type (Pilotage, Infirmerie,
+  Reacteur, Couloir, Radar, Generateur). Un type peut apparaître plusieurs fois.
+- **À fournir par chaque type** : `get_type_id()`, `get_ideal_power()` (W),
+  `get_size()` (cases), `get_possible_failures()`. `get_min_power()` vaut par défaut
+  la moitié de l'optimale.
+- **Valeurs d'instance** : `power_supplied` (W), `temperature` (°C, entier),
   `state` (0–1).
-- Tailles actuelles : 16×16, sauf Couloir 8×16. Un type peut apparaître plusieurs fois.
-- Dessin : sol quadrillé, schéma du type (`_draw_details`, dans une boîte de référence
-  240×240 agrandie), murs avec ouvertures, nom, jauge de batterie (debug seulement).
-- **Éclairage** selon l'alimentation, appliqué via `self_modulate` + 4 lampes dessinées :
-  sous le minimum → rouge 50 % ; entre minimum et optimum → blanc 50–90 % avec
-  clignotements ; à l'optimum → blanc 100 % ; au-delà → légèrement orangé 100 %.
-  Volontairement **pas de `Light2D`** dans les salles : elles rendraient les pièces
-  visibles à travers les murs et casseraient le brouillard de guerre.
+- Dessin : sol quadrillé, schéma du type (`_draw_details`, boîte de référence
+  `DETAILS_REFERENCE` agrandie), murs, nom, jauge et température (debug seulement).
+- **Éclairage** selon l'alimentation (`_update_lighting`) : rouge sous le minimum,
+  blanc atténué avec clignotements jusqu'à l'optimum, orangé au-delà. Appliqué par
+  `self_modulate` + 4 lampes dessinées. **Pas de `Light2D`** dans les salles : elles
+  rendraient les pièces visibles à travers les murs (brouillard de guerre cassé).
+- **Effets de température** (`_create_climate_effects`, shaders
+  `heat_haze.gdshader` / `frost.gdshader`) : déformation au-dessus de
+  `HEAT_THRESHOLD`, givre en dessous de `FROST_THRESHOLD`.
+  - La déformation relit l'écran : `BackBufferCopy` en mode **viewport** (le mode
+    rectangle laisse des bandes noires) et `render_mode unshaded` (l'image lue est
+    déjà assombrie par le brouillard).
 
-### Vaisseau (`ship.gd`)
-- Les modules enfants de `Ship` sont alignés de gauche (arrière) à droite (avant), dans
-  l'ordre de la scène : Generateur, Reacteur, Couloir, Couloir2, Pilotage.
+### Vaisseau — `ship.gd`
+- Aligne ses modules enfants de gauche (arrière) à droite (avant), dans l'ordre de
+  la scène.
 - Le nœud `Structure` (généré, non sauvegardé) contient les collisions des murs, les
-  `LightOccluder2D` et une `Door` par cloison (ouverture de 2 cases).
-- Avance vers la droite à `speed` = 10 px/s (hôte uniquement, synchronisé par `ShipSync`).
-- Les joueurs sont enfants de `Ship/Crew` : ils avancent avec le vaisseau et leurs
-  coordonnées sont dans le repère du vaisseau.
+  `LightOccluder2D` (une seule fois par cloison partagée) et une `Door` par cloison.
+- Avance à `speed`, **simulé par chaque joueur**. Changer `speed` sur l'hôte envoie
+  position + vitesse aux autres ; l'hôte corrige aussi la position toutes les
+  `MOTION_SYNC_INTERVAL` s, écart résorbé en douceur.
+- Les joueurs sont enfants de `Ship/Crew` : coordonnées dans le repère du vaisseau.
+- L'hôte applique alimentation puis température `PowerRules.UPDATE_RATE` fois par
+  seconde, et envoie tout en un RPC (`_receive_modules_state`, non fiable ordonné).
 
-### Alimentation (`power_rules.gd`)
-- Appliquée par l'hôte 10 fois par seconde, puis envoyée en un seul RPC
-  (`Ship._receive_power`, non fiable ordonné).
-- Règle 1 : le Générateur est toujours à l'optimum.
-- Règle 2 : tout autre module gagne 20 W/s, jusqu'à 120 % de son optimum, si un voisin
-  a atteint sa propre alimentation minimale. Sans voisin alimenté, il garde sa charge.
-- Voisins = module précédent et suivant (modules alignés).
-- Envoyée avec les températures dans le RPC `Ship._receive_modules_state`.
+### Alimentation — `power_rules.gd`
+- Le Générateur est toujours à l'optimum.
+- Tout autre module gagne `CHARGE_SPEED` W/s, jusqu'à `MAX_CHARGE_RATIO` × son
+  optimum, si un voisin (module précédent ou suivant) a atteint sa propre
+  alimentation minimale. Sinon il garde sa charge.
 
-### Température (`temperature_rules.gd`)
-- Appliquée par l'hôte juste après l'alimentation.
-- Règle 1 : tout module est à 0 °C par défaut.
-- Règle 2 : +1 °C par tranche de 10 W d'alimentation (`0 + floor(W / 10)`).
-- Effets visuels (calques enfants du module, créés dans `_create_climate_effects`) :
-  au-dessus de 40 °C, déformation par la chaleur (lit l'écran via un `BackBufferCopy`,
-  `unshaded` pour ne pas réassombrir) ; en dessous de 10 °C, givre depuis les murs.
-  Intensité croissante jusqu'à 100 °C / −20 °C.
+### Température — `temperature_rules.gd`
+- `BASE_TEMPERATURE` (0 °C) + 1 °C par tranche de `WATTS_PER_DEGREE` W.
+- N'a pour l'instant qu'un effet visuel.
 
-### Portes (`door.gd`)
-- S'ouvrent quand un `CharacterBody2D` entre dans leur zone de détection, restent
-  ouvertes tant qu'il y est, se referment `open_duration` = 3 s après.
-- Décidées par l'hôte, appliquées partout par RPC `_apply_state`. Un joueur qui arrive
-  reçoit l'état courant (`Ship.send_door_states`).
+### Portes — `door.gd`
+- S'ouvrent quand un `CharacterBody2D` entre dans leur zone, se referment
+  `open_duration` s après son départ. Décidées par l'hôte, appliquées par RPC.
 
-### Réseau (`network.gd`)
+### Réseau — `network.gd`, `player.gd`
 - ENet, 8 joueurs max. L'hôte (id 1) fait autorité sur le vaisseau, les portes et
-  l'alimentation ; **chaque joueur fait autorité sur la position de son personnage**.
-- Personnages créés par `PlayerSpawner` avec une fonction de spawn personnalisée
-  (id + position envoyés par l'hôte) ; nom du nœud = id réseau.
+  l'alimentation ; chaque joueur fait autorité sur son personnage.
+- Personnages créés par `PlayerSpawner` (fonction de spawn personnalisée) ; nom du
+  nœud = id réseau.
+- **Pas de `MultiplayerSynchronizer`** : un joueur envoie ses **ordres** (direction
+  clavier, cible souris) quand ils changent, avec sa position de départ ; chaque
+  machine simule le déplacement. Position finale à l'arrêt, correction toutes les
+  `CORRECTION_INTERVAL` s pendant un déplacement.
+  - `Player._compute_velocity` doit rester **identique sur toutes les machines**.
+- **Joueur qui arrive** : `Network._on_peer_connected` lui envoie l'état du vaisseau,
+  des portes et des personnages. Toute nouvelle donnée synchronisée doit y être ajoutée.
 - Seul le personnage local a caméra et `VisionLight` actives (brouillard propre à
-  chaque joueur). Les autres joueurs prennent une couleur de `OTHER_PLAYER_COLORS`.
+  chaque joueur).
 
-### Brouillard de guerre
-- `FogOfWar` (`CanvasModulate`) à 0.25 = assombrissement de 75 %.
-- `VisionLight` du joueur avec ombres ; son énergie (0.75) doit valoir 1 − la valeur
-  du brouillard pour garder un éclairage normal dans la zone visible.
-- Le fond étoilé est sur un `CanvasLayer` à part (`Background`) pour rester visible.
+### Brouillard de guerre — `fog_of_war.gd`
+- `CanvasModulate` à 0.25 ; l'énergie de `VisionLight` (player.tscn) doit valoir
+  1 − cette valeur pour un éclairage normal dans la zone visible.
+- Le fond étoilé (`starfield.gd`) est sur un `CanvasLayer` à part pour rester visible.
 
-### Mode debug (`debug_mode.gd`)
-- Actif dans l'éditeur et les exports « avec débogage » ; désactivé en export release
-  ou avec l'argument `--release`. Utiliser `DebugMode.is_enabled()` pour tout
-  affichage de développement.
+### Mode debug — `debug_mode.gd`
+- Actif dans l'éditeur et les exports « avec débogage », sauf avec `--release`.
+  Utiliser `DebugMode.is_enabled()` pour tout affichage de développement.
 
 ## Points ouverts / pistes
 
-- Déplacements non vérifiés par le serveur (triche possible) : à rendre autoritaire
-  côté serveur si le jeu devient public.
+- Déplacements non vérifiés par le serveur (triche possible). Les ordres de
+  déplacement sont déjà envoyés : il resterait à faire simuler l'hôte seul.
+- L'alimentation et la température partent 10 fois par seconde même sans changement :
+  principal trafic restant.
 - Pas de calcul d'itinéraire : un clic hors de l'axe d'une porte fait buter contre le mur.
-- Pannes des modules à définir (`get_possible_failures`).
-- État des modules pas encore utilisé par les règles ; la température n'a encore
-  qu'un effet visuel.
+- Pannes des modules à définir (`get_possible_failures`) ; `state` pas encore utilisé.
 - Mobilier des salles agrandi proportionnellement : certains éléments paraissent
   surdimensionnés.
