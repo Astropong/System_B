@@ -76,6 +76,7 @@ func _create_server() -> bool:
 	multiplayer.multiplayer_peer = peer
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	_ship.randomize_module_states()  # TEST : états aléatoires
 	return true
 
 
@@ -119,9 +120,10 @@ func _set_buttons_disabled(disabled: bool) -> void:
 func _on_peer_connected(peer_id: int) -> void:
 	print("Joueur %d connecté." % peer_id)
 	_spawn_player(peer_id)
-	# État courant envoyé au nouveau venu : vaisseau, portes et personnages
-	# (ceux-ci ne sont transmis qu'à chaque changement d'ordre).
+	# État courant envoyé au nouveau venu : vaisseau, état des modules, portes
+	# et personnages (ceux-ci ne sont transmis qu'à chaque changement d'ordre).
 	_ship.send_motion_to(peer_id)
+	_ship.send_module_states(peer_id)
 	_ship.send_door_states(peer_id)
 	for player in _crew.get_children():
 		if player is Player and player.name != str(peer_id):

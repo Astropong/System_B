@@ -21,7 +21,7 @@ func get_type_id() -> Module.ModuleType:
 
 
 func get_ideal_power() -> float:
-	return 100.0
+	return 10.0
 
 
 func get_size() -> Vector2i:

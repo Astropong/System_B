@@ -131,6 +131,36 @@ func _receive_modules_state(power: PackedFloat32Array, room_temperatures: Packed
 		modules[i].machine_temperature = machine_temperatures[i]
 
 
+## TEST : tire au hasard l'état de chaque module (hôte, à la création de la
+## partie). Les joueurs qui arrivent le reçoivent par send_module_states.
+func randomize_module_states() -> void:
+	for m in get_modules():
+		m.state = randf()
+	send_module_states()
+
+
+## Envoie l'état (Module.state) de tous les modules (hôte) : à un seul joueur
+## si [param peer_id] est donné (joueur qui arrive), sinon à tous.
+## À rappeler après chaque changement d'état décidé par l'hôte.
+func send_module_states(peer_id: int = 0) -> void:
+	var states := PackedFloat32Array()
+	for m in get_modules():
+		states.append(m.state)
+	if peer_id == 0:
+		_receive_module_states.rpc(states)
+	else:
+		_receive_module_states.rpc_id(peer_id, states)
+
+
+## État des modules : rare, donc envoyé de manière fiable à chaque changement
+## plutôt qu'avec l'alimentation (10 fois par seconde).
+@rpc("authority", "call_remote", "reliable")
+func _receive_module_states(states: PackedFloat32Array) -> void:
+	var modules := get_modules()
+	for i in mini(states.size(), modules.size()):
+		modules[i].state = states[i]
+
+
 func get_modules() -> Array[Module]:
 	var result: Array[Module] = []
 	for child in get_children():

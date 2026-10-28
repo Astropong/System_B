@@ -42,7 +42,8 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 
 Fichiers rangés **par fonctionnalité** (scène, script et shaders ensemble) :
 `core/` (réseau, mode debug), `ship/` (vaisseau, portes, `rules/`, `modules/`
-et leurs `shaders/`), `player/`, `world/` (fond étoilé, brouillard), `assets/`
+et leurs `shaders/`), `player/`, `world/` (fond étoilé, brouillard), `ui/`
+(interface), `assets/`
 pour les futures ressources. Racine : `main.tscn` et fichiers du projet.
 Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 (`preload`) et les `.tscn`.
@@ -95,8 +96,9 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 
 ### Alimentation — `ship/rules/power_rules.gd`
 - Le Générateur est toujours à l'optimum.
-- Tout autre module gagne `CHARGE_SPEED` W/s, jusqu'à `MAX_CHARGE_RATIO` × son
-  optimum, si un voisin (`Module.neighbors`, relié par une porte) a atteint sa propre
+- Optimum : 100 W pour tous les modules, 10 W pour les couloirs.
+- Tout autre module gagne `CHARGE_SPEED` W/s, plafonné à son optimum (jamais au-delà),
+  si un voisin (`Module.neighbors`, relié par une porte) a atteint sa propre
   alimentation minimale. Sinon il garde sa charge.
 
 ### Température — `ship/rules/temperature_rules.gd`
@@ -122,7 +124,13 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   `CORRECTION_INTERVAL` s pendant un déplacement.
   - `Player._compute_velocity` doit rester **identique sur toutes les machines**.
 - **Joueur qui arrive** : `Network._on_peer_connected` lui envoie l'état du vaisseau,
-  des portes et des personnages. Toute nouvelle donnée synchronisée doit y être ajoutée.
+  l'état des modules, les portes et les personnages. Toute nouvelle donnée
+  synchronisée doit y être ajoutée.
+- **État des modules** (`Module.state`) : décidé par l'hôte, envoyé en fiable par
+  `Ship.send_module_states` (à tous, ou à un joueur qui arrive) → RPC
+  `Ship._receive_module_states`. À rappeler après chaque changement d'état.
+  Pour tester, `Ship.randomize_module_states` le tire au hasard à la création de
+  la partie (`Network._create_server`).
 - Seul le personnage local a caméra et `VisionLight` actives (brouillard propre à
   chaque joueur).
 
@@ -130,6 +138,17 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - `CanvasModulate` à 0.25 ; l'énergie de `VisionLight` (`player/player.tscn`) doit valoir
   1 − cette valeur pour un éclairage normal dans la zone visible.
 - Le fond étoilé (`world/starfield.gd`) est sur un `CanvasLayer` à part pour rester visible.
+
+### Fenêtre de module — `ui/module_window.gd`
+- Action `interact` (Espace, clic droit ; `project.godot`) dans la zone
+  d'interaction d'un module (`Module.get_interaction_rect`, 2 × 2 cases au centre) :
+  ouvre la fenêtre ; même action pour la fermer. Indication en bas d'écran.
+- Centre : `Module.build_interface` (bouton d'exemple par défaut, à redéfinir par
+  type). Côté : état (« Intact » si `state` > `BROKEN_THRESHOLD`, sinon « Cassé »),
+  consommation, températures de la machine et de la pièce.
+- `ModuleWindow.is_open` immobilise le personnage local. Les boutons de la
+  fenêtre ne prennent pas le focus (Espace sert à fermer).
+- Locale à chaque joueur : rien n'est synchronisé.
 
 ### Mode debug — `core/debug_mode.gd`
 - Actif dans l'éditeur et les exports « avec débogage », sauf avec `--release`.
@@ -142,5 +161,8 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - L'alimentation et la température partent 10 fois par seconde même sans changement :
   principal trafic restant.
 - Pas de calcul d'itinéraire : un clic hors de l'axe d'une porte fait buter contre le mur.
-- Pannes des modules à définir (`get_possible_failures`) ; `state` pas encore utilisé.
+- Pannes des modules à définir (`get_possible_failures`) ; `state` seulement affiché
+  (valeurs aléatoires de test).
+- Surchauffe et surtension à venir : le code d'éclairage orangé (au-delà de
+  l'optimum) reste en place, bien que la recharge soit plafonnée à l'optimum.
 - Le mobilier est seulement dessiné : il ne bloque pas les déplacements.

@@ -11,7 +11,7 @@ func get_type_id() -> Module.ModuleType:
 
 
 func get_ideal_power() -> float:
-	return 700.0
+	return 100.0
 
 
 func get_possible_failures() -> Array[StringName]:

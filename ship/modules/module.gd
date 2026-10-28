@@ -66,7 +66,7 @@ const BATTERY_POSITION := Vector2(CELL_SIZE * 0.75, CELL_SIZE * 1.5)
 const BATTERY_SIZE := Vector2(28, 140)
 const BATTERY_EMPTY_COLOR := Color(0.08, 0.09, 0.1)
 const BATTERY_OK_COLOR := Color(0.3, 0.9, 0.4)
-const BATTERY_OVERLOAD_COLOR := Color(0.95, 0.25, 0.2)
+const BATTERY_LOW_COLOR := Color(0.95, 0.25, 0.2)
 
 ## Éclairage de la salle selon l'alimentation (voir _update_lighting).
 const LIGHT_LOW_COLOR := Color(1.0, 0.3, 0.25)        # sous le minimum : rouge
@@ -83,6 +83,12 @@ const FLICKER_RATE_NEAR_OPTIMAL := 0.8
 ## Lampes : position (retrait depuis les coins) et taille.
 const LAMP_INSET := 24.0
 const LAMP_RADIUS := 6.0
+
+## Zone d'interaction (voir get_interaction_rect) : taille en cases et couleur.
+const INTERACTION_SIZE := Vector2(2, 2)
+const INTERACTION_COLOR := Color(1, 1, 1, 0.35)
+## Au-dessus de cet état, le module est intact ; sinon il est cassé.
+const BROKEN_THRESHOLD := 0.5
 
 ## Aménagement des salles (voir _draw_details) : meubles en aplat sombre
 ## cerclés de la couleur du type, emblème au sol en transparence.
@@ -177,6 +183,33 @@ func get_size() -> Vector2i:
 
 
 # --- Méthodes communes -------------------------------------------------------
+
+## Vrai si l'état du module dépasse BROKEN_THRESHOLD.
+func is_intact() -> bool:
+	return state > BROKEN_THRESHOLD
+
+
+## Zone d'interaction (px, coordonnées locales) : un joueur qui s'y trouve
+## peut ouvrir la fenêtre du module (voir ModuleWindow). Pour l'instant
+## INTERACTION_SIZE cases au centre de la salle.
+func get_interaction_rect() -> Rect2:
+	var size := INTERACTION_SIZE * CELL_SIZE
+	return Rect2((get_pixel_size() - size) / 2.0, size)
+
+
+## Remplit le centre de la fenêtre du module avec les éléments propres au
+## type. Par défaut : un bouton d'exemple. Une classe fille peut la redéfinir.
+## Les boutons ne doivent pas prendre le focus (Espace ferme la fenêtre).
+func build_interface(container: Container) -> void:
+	var button := Button.new()
+	button.text = "Bouton d'exemple : %s" % get_type_name()
+	button.focus_mode = Control.FOCUS_NONE
+	var presses := [0]
+	button.pressed.connect(func() -> void:
+		presses[0] += 1
+		button.text = "Bouton d'exemple : %s (%d)" % [get_type_name(), presses[0]])
+	container.add_child(button)
+
 
 func get_type_name() -> String:
 	return TYPE_NAMES[get_type_id()]
@@ -368,6 +401,11 @@ func _draw() -> void:
 	# Aménagement propre au type de module, à l'échelle réelle.
 	_draw_details(rect)
 
+	# Zone d'interaction.
+	var zone := get_interaction_rect()
+	draw_rect(zone, Color(INTERACTION_COLOR, 0.08))
+	draw_rect(zone, INTERACTION_COLOR, false, 2.0)
+
 	# Murs (avec les ouvertures des portes).
 	for line in get_wall_lines():
 		draw_line(line[0], line[1], WALL_COLOR, WALL_THICKNESS)
@@ -381,9 +419,8 @@ func _draw() -> void:
 		_draw_battery()
 
 
-## Jauge verticale de l'alimentation : pleine et verte à l'alimentation
-## optimale, elle vire progressivement au rouge au-delà, jusqu'au plafond
-## de recharge (PowerRules.MAX_CHARGE_RATIO).
+## Jauge verticale de l'alimentation : pleine à l'alimentation optimale (le
+## plafond de recharge), rouge sous l'alimentation minimale, verte au-dessus.
 func _draw_battery() -> void:
 	var rect := Rect2(BATTERY_POSITION, BATTERY_SIZE)
 	var ratio := get_power_ratio()
@@ -397,8 +434,7 @@ func _draw_battery() -> void:
 	if fill > 0.0:
 		var inner_height := rect.size.y - 6.0
 		var h := inner_height * fill
-		var overload := clampf((ratio - 1.0) / (PowerRules.MAX_CHARGE_RATIO - 1.0), 0.0, 1.0)
-		var color := BATTERY_OK_COLOR.lerp(BATTERY_OVERLOAD_COLOR, overload)
+		var color := BATTERY_OK_COLOR if power_supplied >= get_min_power() else BATTERY_LOW_COLOR
 		draw_rect(Rect2(rect.position.x + 3, rect.end.y - 3 - h, rect.size.x - 6, h), color)
 
 	draw_rect(rect, WALL_COLOR, false, 2.0)

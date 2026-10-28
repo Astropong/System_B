@@ -7,8 +7,8 @@ extends RefCounted
 ##
 ## Règles actuelles :
 ## 1. Le générateur est toujours alimenté de manière optimale.
-## 2. Tout autre module se recharge de CHARGE_SPEED W/s, jusqu'à
-##    MAX_CHARGE_RATIO × son alimentation optimale, dès qu'un module adjacent
+## 2. Tout autre module se recharge de CHARGE_SPEED W/s, jusqu'à son
+##    alimentation optimale (jamais au-delà), dès qu'un module adjacent
 ##    (relié par une porte, voir Module.neighbors) a atteint sa propre
 ##    alimentation minimale de fonctionnement (Module.get_min_power()).
 
@@ -16,8 +16,6 @@ extends RefCounted
 const UPDATE_RATE := 10.0
 ## Vitesse de recharge d'un module (W par seconde).
 const CHARGE_SPEED := 20.0
-## Plafond de recharge, en proportion de l'alimentation optimale (120 %).
-const MAX_CHARGE_RATIO := 1.2
 
 
 ## Applique les règles pour un pas de temps [param delta] (en secondes).
@@ -43,6 +41,6 @@ static func update(modules: Array[Module], delta: float) -> void:
 		for n in m.neighbors:
 			if supplying.get(n, false):
 				has_powered_neighbor = true
-		var cap := m.get_ideal_power() * MAX_CHARGE_RATIO
+		var cap := m.get_ideal_power()
 		if has_powered_neighbor and m.power_supplied < cap:
 			m.power_supplied = minf(m.power_supplied + CHARGE_SPEED * delta, cap)

@@ -16,6 +16,7 @@
 [ext_resource type="Script" path="res://ship/modules/module_construction.gd" id="14_construction"]
 [ext_resource type="Script" path="res://ship/modules/module_tourelles.gd" id="15_tourelles"]
 [ext_resource type="Script" path="res://ship/modules/module_radar.gd" id="16_radar"]
+[ext_resource type="Script" path="res://ui/module_window.gd" id="17_module_window"]
 
 [node name="Main" type="Node2D" unique_id=1339899747]
 
@@ -102,6 +103,17 @@ script = ExtResource("8_fog")
 offset_left = 16.0
 offset_top = 12.0
 text = "Flèches : se déplacer   |   Clic gauche (ou maintenu) : aller vers la souris   |   Les portes s'ouvrent à l'approche"
+
+[node name="ModuleWindow" type="Control" parent="HUD" node_paths=PackedStringArray("ship") unique_id=1765340921]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("17_module_window")
+ship = NodePath("../../Ship")
 
 [node name="Menu" type="PanelContainer" parent="HUD" unique_id=90238282]
 unique_name_in_owner = true

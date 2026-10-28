@@ -90,6 +90,12 @@ func _physics_process(delta: float) -> void:
 
 
 func _read_input() -> void:
+	# Fenêtre de module ouverte : le personnage reste immobile.
+	if ModuleWindow.is_open:
+		input_dir = Vector2.ZERO
+		has_target = false
+		return
+
 	# Souris : tant que le bouton gauche est enfoncé, la cible suit le curseur.
 	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		target = _global_to_parent(get_global_mouse_position())
