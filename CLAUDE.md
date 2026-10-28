@@ -40,7 +40,14 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 
 ## Architecture
 
-### Modules — `modules/module.gd`, `modules/module_*.gd`
+Fichiers rangés **par fonctionnalité** (scène, script et shaders ensemble) :
+`core/` (réseau, mode debug), `ship/` (vaisseau, portes, `rules/`, `modules/`
+et leurs `shaders/`), `player/`, `world/` (fond étoilé, brouillard), `assets/`
+pour les futures ressources. Racine : `main.tscn` et fichiers du projet.
+Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
+(`preload`) et les `.tscn`.
+
+### Modules — `ship/modules/module.gd`, `ship/modules/module_*.gd`
 - `Module` est abstraite (`@abstract`) ; un fichier par type (Pilotage, Infirmerie,
   Reacteur, Couloir, Radar, Generateur). Un type peut apparaître plusieurs fois.
 - **À fournir par chaque type** : `get_type_id()`, `get_ideal_power()` (W),
@@ -55,13 +62,13 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
   `self_modulate` + 4 lampes dessinées. **Pas de `Light2D`** dans les salles : elles
   rendraient les pièces visibles à travers les murs (brouillard de guerre cassé).
 - **Effets de température** (`_create_climate_effects`, shaders
-  `heat_haze.gdshader` / `frost.gdshader`) : déformation au-dessus de
+  `ship/modules/shaders/heat_haze.gdshader` / `frost.gdshader`) : déformation au-dessus de
   `HEAT_THRESHOLD`, givre en dessous de `FROST_THRESHOLD` (température de la pièce).
   - La déformation relit l'écran : `BackBufferCopy` en mode **viewport** (le mode
     rectangle laisse des bandes noires) et `render_mode unshaded` (l'image lue est
     déjà assombrie par le brouillard).
 
-### Vaisseau — `ship.gd`
+### Vaisseau — `ship/ship.gd`
 - Aligne ses modules enfants de gauche (arrière) à droite (avant), dans l'ordre de
   la scène.
 - Le nœud `Structure` (généré, non sauvegardé) contient les collisions des murs, les
@@ -73,13 +80,13 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 - L'hôte applique alimentation puis température `PowerRules.UPDATE_RATE` fois par
   seconde, et envoie tout en un RPC (`_receive_modules_state`, non fiable ordonné).
 
-### Alimentation — `power_rules.gd`
+### Alimentation — `ship/rules/power_rules.gd`
 - Le Générateur est toujours à l'optimum.
 - Tout autre module gagne `CHARGE_SPEED` W/s, jusqu'à `MAX_CHARGE_RATIO` × son
   optimum, si un voisin (module précédent ou suivant) a atteint sa propre
   alimentation minimale. Sinon il garde sa charge.
 
-### Température — `temperature_rules.gd`
+### Température — `ship/rules/temperature_rules.gd`
 - Machine : cible = puissance / `MACHINE_WATTS_PER_DEGREE`.
 - Pièce : cible = `ROOM_BASE_TEMPERATURE` + machine / `ROOM_MACHINE_DIVISOR`.
 - Chacune rejoint sa cible à une vitesse (°C/s) lente sous un petit écart, rapide
@@ -87,11 +94,11 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
   `MACHINE_*` / `ROOM_*`). Mise à jour au même pas que l'alimentation.
 - N'a pour l'instant qu'un effet visuel.
 
-### Portes — `door.gd`
+### Portes — `ship/door.gd`
 - S'ouvrent quand un `CharacterBody2D` entre dans leur zone, se referment
   `open_duration` s après son départ. Décidées par l'hôte, appliquées par RPC.
 
-### Réseau — `network.gd`, `player.gd`
+### Réseau — `core/network.gd`, `player/player.gd`
 - ENet, 8 joueurs max. L'hôte (id 1) fait autorité sur le vaisseau, les portes et
   l'alimentation ; chaque joueur fait autorité sur son personnage.
 - Personnages créés par `PlayerSpawner` (fonction de spawn personnalisée) ; nom du
@@ -106,12 +113,12 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 - Seul le personnage local a caméra et `VisionLight` actives (brouillard propre à
   chaque joueur).
 
-### Brouillard de guerre — `fog_of_war.gd`
-- `CanvasModulate` à 0.25 ; l'énergie de `VisionLight` (player.tscn) doit valoir
+### Brouillard de guerre — `world/fog_of_war.gd`
+- `CanvasModulate` à 0.25 ; l'énergie de `VisionLight` (`player/player.tscn`) doit valoir
   1 − cette valeur pour un éclairage normal dans la zone visible.
-- Le fond étoilé (`starfield.gd`) est sur un `CanvasLayer` à part pour rester visible.
+- Le fond étoilé (`world/starfield.gd`) est sur un `CanvasLayer` à part pour rester visible.
 
-### Mode debug — `debug_mode.gd`
+### Mode debug — `core/debug_mode.gd`
 - Actif dans l'éditeur et les exports « avec débogage », sauf avec `--release`.
   Utiliser `DebugMode.is_enabled()` pour tout affichage de développement.
 

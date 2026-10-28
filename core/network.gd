@@ -16,7 +16,7 @@ const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
 const DEFAULT_ADDRESS := "127.0.0.1"
 
-@export var player_scene: PackedScene = preload("res://player.tscn")
+@export var player_scene: PackedScene = preload("res://player/player.tscn")
 
 @onready var _ship: Ship = $"../Ship"
 @onready var _crew: Node2D = $"../Ship/Crew"

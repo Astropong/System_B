@@ -40,8 +40,8 @@ const FROST_THRESHOLD := 10
 const FROST_FULL := -20
 ## Intensité d'un effet dès que son seuil est franchi (0–1).
 const CLIMATE_EFFECT_MIN_STRENGTH := 0.3
-const HEAT_SHADER := preload("res://modules/heat_haze.gdshader")
-const FROST_SHADER := preload("res://modules/frost.gdshader")
+const HEAT_SHADER := preload("res://ship/modules/shaders/heat_haze.gdshader")
+const FROST_SHADER := preload("res://ship/modules/shaders/frost.gdshader")
 
 const FLOOR_COLOR := Color(0.16, 0.17, 0.2)
 const GRID_COLOR := Color(1, 1, 1, 0.05)

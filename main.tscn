@@ -1,13 +1,13 @@
 [gd_scene format=3]
 
-[ext_resource type="Script" path="res://starfield.gd" id="1_starfield"]
-[ext_resource type="Script" path="res://ship.gd" id="2_ship"]
-[ext_resource type="Script" path="res://modules/module_generateur.gd" id="3_generateur"]
-[ext_resource type="Script" path="res://modules/module_reacteur.gd" id="4_reacteur"]
-[ext_resource type="Script" path="res://modules/module_couloir.gd" id="5_couloir"]
-[ext_resource type="Script" path="res://modules/module_pilotage.gd" id="6_pilotage"]
-[ext_resource type="Script" path="res://network.gd" id="7_network"]
-[ext_resource type="Script" path="res://fog_of_war.gd" id="8_fog"]
+[ext_resource type="Script" path="res://world/starfield.gd" id="1_starfield"]
+[ext_resource type="Script" path="res://ship/ship.gd" id="2_ship"]
+[ext_resource type="Script" path="res://ship/modules/module_generateur.gd" id="3_generateur"]
+[ext_resource type="Script" path="res://ship/modules/module_reacteur.gd" id="4_reacteur"]
+[ext_resource type="Script" path="res://ship/modules/module_couloir.gd" id="5_couloir"]
+[ext_resource type="Script" path="res://ship/modules/module_pilotage.gd" id="6_pilotage"]
+[ext_resource type="Script" path="res://core/network.gd" id="7_network"]
+[ext_resource type="Script" path="res://world/fog_of_war.gd" id="8_fog"]
 
 [node name="Main" type="Node2D"]
 
