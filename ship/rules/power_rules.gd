@@ -9,8 +9,8 @@ extends RefCounted
 ## 1. Le générateur est toujours alimenté de manière optimale.
 ## 2. Tout autre module se recharge de CHARGE_SPEED W/s, jusqu'à
 ##    MAX_CHARGE_RATIO × son alimentation optimale, dès qu'un module adjacent
-##    a atteint sa propre alimentation minimale de fonctionnement
-##    (Module.get_min_power()).
+##    (relié par une porte, voir Module.neighbors) a atteint sa propre
+##    alimentation minimale de fonctionnement (Module.get_min_power()).
 
 ## Nombre de mises à jour de l'alimentation par seconde.
 const UPDATE_RATE := 10.0
@@ -21,7 +21,7 @@ const MAX_CHARGE_RATIO := 1.2
 
 
 ## Applique les règles pour un pas de temps [param delta] (en secondes).
-## [param modules] est la liste des modules dans l'ordre du vaisseau.
+## [param modules] est la liste des modules du vaisseau.
 static func update(modules: Array[Module], delta: float) -> void:
 	# Règle 1 : le générateur est toujours à l'optimum.
 	for m in modules:
@@ -31,30 +31,18 @@ static func update(modules: Array[Module], delta: float) -> void:
 	# On note d'abord quels modules alimentent leurs voisins (ceux qui ont atteint
 	# leur alimentation minimale), pour que l'ordre de traitement n'influence pas
 	# le résultat.
-	var supplying: Array[bool] = []
+	var supplying := {}
 	for m in modules:
-		supplying.append(m.power_supplied >= m.get_min_power())
+		supplying[m] = m.power_supplied >= m.get_min_power()
 
 	# Règle 2 : recharge progressive à partir d'un voisin suffisamment alimenté.
-	for i in modules.size():
-		var m := modules[i]
+	for m in modules:
 		if m.get_type_id() == Module.ModuleType.GENERATEUR:
 			continue
 		var has_powered_neighbor := false
-		for j in get_neighbor_indices(modules, i):
-			if supplying[j]:
+		for n in m.neighbors:
+			if supplying.get(n, false):
 				has_powered_neighbor = true
 		var cap := m.get_ideal_power() * MAX_CHARGE_RATIO
 		if has_powered_neighbor and m.power_supplied < cap:
 			m.power_supplied = minf(m.power_supplied + CHARGE_SPEED * delta, cap)
-
-
-## Indices des modules adjacents au module [param index].
-## Les modules étant alignés, ce sont le précédent et le suivant.
-static func get_neighbor_indices(modules: Array[Module], index: int) -> Array[int]:
-	var result: Array[int] = []
-	if index > 0:
-		result.append(index - 1)
-	if index < modules.size() - 1:
-		result.append(index + 1)
-	return result

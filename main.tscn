@@ -1,63 +1,109 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://brjtlu3oxjhrb"]
 
-[ext_resource type="Script" path="res://world/starfield.gd" id="1_starfield"]
-[ext_resource type="Script" path="res://ship/ship.gd" id="2_ship"]
-[ext_resource type="Script" path="res://ship/modules/module_generateur.gd" id="3_generateur"]
-[ext_resource type="Script" path="res://ship/modules/module_reacteur.gd" id="4_reacteur"]
-[ext_resource type="Script" path="res://ship/modules/module_couloir.gd" id="5_couloir"]
-[ext_resource type="Script" path="res://ship/modules/module_pilotage.gd" id="6_pilotage"]
-[ext_resource type="Script" path="res://core/network.gd" id="7_network"]
-[ext_resource type="Script" path="res://world/fog_of_war.gd" id="8_fog"]
+[ext_resource type="Script" uid="uid://c3oilcynq6wsa" path="res://world/starfield.gd" id="1_starfield"]
+[ext_resource type="Script" uid="uid://bhth6b0nvn48g" path="res://ship/ship.gd" id="2_ship"]
+[ext_resource type="Script" uid="uid://b0l52k8a0wyts" path="res://ship/modules/module_generateur.gd" id="3_generateur"]
+[ext_resource type="Script" uid="uid://gbfqvsgfh8bl" path="res://ship/modules/module_reacteur.gd" id="4_reacteur"]
+[ext_resource type="Script" uid="uid://bkmcgx1lop5vg" path="res://ship/modules/module_couloir.gd" id="5_couloir"]
+[ext_resource type="Script" uid="uid://dtoyab845r6hv" path="res://ship/modules/module_pilotage.gd" id="6_pilotage"]
+[ext_resource type="Script" uid="uid://b0mmmsdgnauvy" path="res://core/network.gd" id="7_network"]
+[ext_resource type="Script" uid="uid://bjj18qyskjdq8" path="res://world/fog_of_war.gd" id="8_fog"]
+[ext_resource type="Script" path="res://ship/modules/module_infirmerie.gd" id="9_infirmerie"]
+[ext_resource type="Script" path="res://ship/modules/module_oxygene.gd" id="10_oxygene"]
+[ext_resource type="Script" path="res://ship/modules/module_maintenance.gd" id="11_maintenance"]
+[ext_resource type="Script" path="res://ship/modules/module_telecommunication.gd" id="12_telecommunication"]
+[ext_resource type="Script" path="res://ship/modules/module_laboratoire.gd" id="13_laboratoire"]
+[ext_resource type="Script" path="res://ship/modules/module_construction.gd" id="14_construction"]
+[ext_resource type="Script" path="res://ship/modules/module_tourelles.gd" id="15_tourelles"]
+[ext_resource type="Script" path="res://ship/modules/module_radar.gd" id="16_radar"]
 
-[node name="Main" type="Node2D"]
+[node name="Main" type="Node2D" unique_id=1339899747]
 
-[node name="Background" type="CanvasLayer" parent="."]
+[node name="Background" type="CanvasLayer" parent="." unique_id=280828796]
 layer = -1
 follow_viewport_enabled = true
 
-[node name="Starfield" type="Node2D" parent="Background"]
+[node name="Starfield" type="Node2D" parent="Background" unique_id=30285419]
 script = ExtResource("1_starfield")
 
-[node name="Ship" type="Node2D" parent="."]
+[node name="Ship" type="Node2D" parent="." unique_id=1686920248]
 position = Vector2(576, 324)
 script = ExtResource("2_ship")
 
-[node name="Generateur" type="Node2D" parent="Ship"]
-script = ExtResource("3_generateur")
+[node name="Tourelles" type="Node2D" parent="Ship" unique_id=1408823561]
+script = ExtResource("15_tourelles")
 
-[node name="Reacteur" type="Node2D" parent="Ship"]
+[node name="Reacteur" type="Node2D" parent="Ship" unique_id=1331047277]
 script = ExtResource("4_reacteur")
+grid_position = Vector2i(0, 16)
 
-[node name="Couloir" type="Node2D" parent="Ship"]
+[node name="Generateur" type="Node2D" parent="Ship" unique_id=1063155301]
+script = ExtResource("3_generateur")
+grid_position = Vector2i(0, 32)
+
+[node name="Maintenance" type="Node2D" parent="Ship" unique_id=1734090123]
+script = ExtResource("11_maintenance")
+grid_position = Vector2i(0, 48)
+
+[node name="Couloir" type="Node2D" parent="Ship" unique_id=1996406122]
 script = ExtResource("5_couloir")
+grid_position = Vector2i(16, 0)
+size_cells = Vector2i(8, 64)
 
-[node name="Couloir2" type="Node2D" parent="Ship"]
+[node name="Laboratoire" type="Node2D" parent="Ship" unique_id=1520117644]
+script = ExtResource("13_laboratoire")
+grid_position = Vector2i(24, 0)
+
+[node name="Infirmerie" type="Node2D" parent="Ship" unique_id=1192837465]
+script = ExtResource("9_infirmerie")
+grid_position = Vector2i(24, 16)
+
+[node name="Oxygene" type="Node2D" parent="Ship" unique_id=1647382910]
+script = ExtResource("10_oxygene")
+grid_position = Vector2i(24, 32)
+
+[node name="Construction" type="Node2D" parent="Ship" unique_id=1873625140]
+script = ExtResource("14_construction")
+grid_position = Vector2i(24, 48)
+
+[node name="Couloir2" type="Node2D" parent="Ship" unique_id=1920503775]
 script = ExtResource("5_couloir")
+grid_position = Vector2i(40, 0)
+size_cells = Vector2i(8, 64)
 
-[node name="Pilotage" type="Node2D" parent="Ship"]
+[node name="Radar" type="Node2D" parent="Ship" unique_id=1283746501]
+script = ExtResource("16_radar")
+grid_position = Vector2i(48, 0)
+
+[node name="Pilotage" type="Node2D" parent="Ship" unique_id=925782284]
 script = ExtResource("6_pilotage")
+grid_position = Vector2i(48, 16)
 
-[node name="Crew" type="Node2D" parent="Ship"]
+[node name="Telecommunication" type="Node2D" parent="Ship" unique_id=1958372016]
+script = ExtResource("12_telecommunication")
+grid_position = Vector2i(48, 32)
 
-[node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
+[node name="Crew" type="Node2D" parent="Ship" unique_id=236747848]
+
+[node name="PlayerSpawner" type="MultiplayerSpawner" parent="." unique_id=522660842]
 spawn_path = NodePath("../Ship/Crew")
 
-[node name="Network" type="Node" parent="."]
+[node name="Network" type="Node" parent="." unique_id=1956242022]
 script = ExtResource("7_network")
 
-[node name="FogOfWar" type="CanvasModulate" parent="."]
+[node name="FogOfWar" type="CanvasModulate" parent="." unique_id=572691574]
 visible = false
 color = Color(0.25, 0.25, 0.25, 1)
 script = ExtResource("8_fog")
 
-[node name="HUD" type="CanvasLayer" parent="."]
+[node name="HUD" type="CanvasLayer" parent="." unique_id=452667618]
 
-[node name="Instructions" type="Label" parent="HUD"]
+[node name="Instructions" type="Label" parent="HUD" unique_id=1314621133]
 offset_left = 16.0
 offset_top = 12.0
 text = "Flèches : se déplacer   |   Clic gauche (ou maintenu) : aller vers la souris   |   Les portes s'ouvrent à l'approche"
 
-[node name="Menu" type="PanelContainer" parent="HUD"]
+[node name="Menu" type="PanelContainer" parent="HUD" unique_id=90238282]
 unique_name_in_owner = true
 anchors_preset = 8
 anchor_left = 0.5
@@ -71,34 +117,41 @@ offset_bottom = 130.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Margin" type="MarginContainer" parent="HUD/Menu"]
+[node name="Margin" type="MarginContainer" parent="HUD/Menu" unique_id=339697694]
+layout_mode = 2
 theme_override_constants/margin_left = 20
 theme_override_constants/margin_top = 20
 theme_override_constants/margin_right = 20
 theme_override_constants/margin_bottom = 20
 
-[node name="VBox" type="VBoxContainer" parent="HUD/Menu/Margin"]
+[node name="VBox" type="VBoxContainer" parent="HUD/Menu/Margin" unique_id=545726696]
+layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Title" type="Label" parent="HUD/Menu/Margin/VBox"]
+[node name="Title" type="Label" parent="HUD/Menu/Margin/VBox" unique_id=210981887]
+layout_mode = 2
 text = "System B - Multijoueur"
 horizontal_alignment = 1
 
-[node name="HostButton" type="Button" parent="HUD/Menu/Margin/VBox"]
+[node name="HostButton" type="Button" parent="HUD/Menu/Margin/VBox" unique_id=2061751644]
 unique_name_in_owner = true
+layout_mode = 2
 text = "Héberger une partie"
 
-[node name="Address" type="LineEdit" parent="HUD/Menu/Margin/VBox"]
+[node name="Address" type="LineEdit" parent="HUD/Menu/Margin/VBox" unique_id=1668536908]
 unique_name_in_owner = true
+layout_mode = 2
 text = "127.0.0.1"
 placeholder_text = "Adresse de l'hôte"
 
-[node name="JoinButton" type="Button" parent="HUD/Menu/Margin/VBox"]
+[node name="JoinButton" type="Button" parent="HUD/Menu/Margin/VBox" unique_id=618584700]
 unique_name_in_owner = true
+layout_mode = 2
 text = "Rejoindre"
 
-[node name="Status" type="Label" parent="HUD/Menu/Margin/VBox"]
+[node name="Status" type="Label" parent="HUD/Menu/Margin/VBox" unique_id=803731277]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
 horizontal_alignment = 1
 autowrap_mode = 3

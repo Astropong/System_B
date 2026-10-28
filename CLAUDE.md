@@ -49,14 +49,24 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 
 ### Modules — `ship/modules/module.gd`, `ship/modules/module_*.gd`
 - `Module` est abstraite (`@abstract`) ; un fichier par type (Pilotage, Infirmerie,
-  Reacteur, Couloir, Radar, Generateur). Un type peut apparaître plusieurs fois.
+  Reacteur, Couloir, Radar, Generateur, Oxygene, Maintenance, Telecommunication,
+  Laboratoire, Construction, Tourelles). Un type peut apparaître plusieurs fois.
 - **À fournir par chaque type** : `get_type_id()`, `get_ideal_power()` (W),
-  `get_size()` (cases), `get_possible_failures()`. `get_min_power()` vaut par défaut
-  la moitié de l'optimale.
+  `get_possible_failures()`. `get_size()` (cases) vaut par défaut `DEFAULT_SIZE`
+  (16 × 16) ; le Couloir la règle par instance (`size_cells`). `get_min_power()`
+  vaut par défaut la moitié de l'optimale.
 - **Valeurs d'instance** : `power_supplied` (W), `room_temperature` et
-  `machine_temperature` (°C, réels, affichés arrondis), `state` (0–1).
-- Dessin : sol quadrillé, schéma du type (`_draw_details`, boîte de référence
-  `DETAILS_REFERENCE` agrandie), murs, nom, jauge et température (debug seulement).
+  `machine_temperature` (°C, réels, affichés arrondis), `state` (0–1),
+  `grid_position` (cases, réglée dans la scène). `doorways` et `neighbors` sont
+  calculés par le vaisseau.
+- Dessin : sol quadrillé, aménagement du type (`_draw_details`, à l'échelle réelle),
+  murs, nom en haut à gauche, jauge et températures (debug seulement).
+- **Style des salles** (minimaliste) : une couleur `ACCENT` par type ; meubles en
+  aplat sombre cerclés de cette couleur (`_draw_furniture`,
+  `_draw_round_furniture`) dans les quatre zones `QUADRANTS` ; emblème au sol en
+  transparence au centre (`emblem_color`). La croix centrale (cases 6 à 10) reste
+  libre pour le passage entre les portes, le coin supérieur gauche pour le nom
+  et la jauge. Coordonnées en cases avec `cells()` / `cell_point()`.
 - **Éclairage** selon l'alimentation (`_update_lighting`) : rouge sous le minimum,
   blanc atténué avec clignotements jusqu'à l'optimum, orangé au-delà. Appliqué par
   `self_modulate` + 4 lampes dessinées. **Pas de `Light2D`** dans les salles : elles
@@ -69,10 +79,13 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
     déjà assombrie par le brouillard).
 
 ### Vaisseau — `ship/ship.gd`
-- Aligne ses modules enfants de gauche (arrière) à droite (avant), dans l'ordre de
-  la scène.
+- Place ses modules enfants selon leur `grid_position`, l'ensemble centré sur le
+  vaisseau ; l'avant est à droite. Disposition actuelle (64 × 64 cases) : trois
+  colonnes de salles séparées par deux couloirs verticaux de 8 × 64 cases.
+- Deux modules qui partagent au moins `MIN_SHARED_WALL` cases de mur sont voisins,
+  avec une porte au milieu de la partie commune (verticale ou pivotée de 90°).
 - Le nœud `Structure` (généré, non sauvegardé) contient les collisions des murs, les
-  `LightOccluder2D` (une seule fois par cloison partagée) et une `Door` par cloison.
+  `LightOccluder2D` (murs fusionnés par droite : `_merge_wall_lines`) et les `Door`.
 - Avance à `speed`, **simulé par chaque joueur**. Changer `speed` sur l'hôte envoie
   position + vitesse aux autres ; l'hôte corrige aussi la position toutes les
   `MOTION_SYNC_INTERVAL` s, écart résorbé en douceur.
@@ -83,7 +96,7 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 ### Alimentation — `ship/rules/power_rules.gd`
 - Le Générateur est toujours à l'optimum.
 - Tout autre module gagne `CHARGE_SPEED` W/s, jusqu'à `MAX_CHARGE_RATIO` × son
-  optimum, si un voisin (module précédent ou suivant) a atteint sa propre
+  optimum, si un voisin (`Module.neighbors`, relié par une porte) a atteint sa propre
   alimentation minimale. Sinon il garde sa charge.
 
 ### Température — `ship/rules/temperature_rules.gd`
@@ -130,5 +143,4 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   principal trafic restant.
 - Pas de calcul d'itinéraire : un clic hors de l'axe d'une porte fait buter contre le mur.
 - Pannes des modules à définir (`get_possible_failures`) ; `state` pas encore utilisé.
-- Mobilier des salles agrandi proportionnellement : certains éléments paraissent
-  surdimensionnés.
+- Le mobilier est seulement dessiné : il ne bloque pas les déplacements.

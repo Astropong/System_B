@@ -7,10 +7,13 @@ extends Node2D
 ## Les caractéristiques du TYPE (identifiant, consommation idéale, taille,
 ## pannes possibles) sont fournies par chaque classe fille via les méthodes
 ## abstraites ci-dessous. Les valeurs propres à CHAQUE INSTANCE (puissance
-## fournie, températures de la machine et de la pièce, état) sont des variables
-## de cette classe.
+## fournie, températures de la machine et de la pièce, état, place dans le
+## vaisseau) sont des variables de cette classe.
 
-enum ModuleType { PILOTAGE, INFIRMERIE, REACTEUR, COULOIR, RADAR, GENERATEUR }
+enum ModuleType {
+	PILOTAGE, INFIRMERIE, REACTEUR, COULOIR, RADAR, GENERATEUR,
+	OXYGENE, MAINTENANCE, TELECOMMUNICATION, LABORATOIRE, CONSTRUCTION, TOURELLES,
+}
 
 const TYPE_NAMES := {
 	ModuleType.PILOTAGE: "Pilotage",
@@ -19,10 +22,19 @@ const TYPE_NAMES := {
 	ModuleType.COULOIR: "Couloir",
 	ModuleType.RADAR: "Radar",
 	ModuleType.GENERATEUR: "Générateur",
+	ModuleType.OXYGENE: "Générateur d'oxygène",
+	ModuleType.MAINTENANCE: "Salle de maintenance",
+	ModuleType.TELECOMMUNICATION: "Salle de télécommunication",
+	ModuleType.LABORATOIRE: "Laboratoire",
+	ModuleType.CONSTRUCTION: "Salle de construction",
+	ModuleType.TOURELLES: "Tourelles",
 }
 
 ## Taille d'une case en pixels : le diamètre du personnage.
 const CELL_SIZE := 48.0
+
+## Taille par défaut d'un module (cases).
+const DEFAULT_SIZE := Vector2i(16, 16)
 
 ## Largeur de l'ouverture d'une porte entre deux modules (2 cases).
 const DOOR_SIZE := CELL_SIZE * 2.0
@@ -72,9 +84,16 @@ const FLICKER_RATE_NEAR_OPTIMAL := 0.8
 const LAMP_INSET := 24.0
 const LAMP_RADIUS := 6.0
 
-## Taille (px) de la boîte de référence dans laquelle chaque type dessine
-## son schéma ; le dessin est ensuite agrandi pour remplir la salle.
-const DETAILS_REFERENCE := 240.0
+## Aménagement des salles (voir _draw_details) : meubles en aplat sombre
+## cerclés de la couleur du type, emblème au sol en transparence.
+const FURNITURE_COLOR := Color(0.23, 0.25, 0.3)
+const FURNITURE_OUTLINE := 2.0
+const EMBLEM_ALPHA := 0.22
+## Coins supérieurs gauches (cases) des quatre zones d'aménagement d'une salle
+## de taille DEFAULT_SIZE, de QUADRANT_SIZE × QUADRANT_SIZE cases chacune,
+## hors de la croix de passage centrale.
+const QUADRANTS: Array[Vector2] = [Vector2(2.5, 2.5), Vector2(10.5, 2.5), Vector2(2.5, 10.5), Vector2(10.5, 10.5)]
+const QUADRANT_SIZE := 3.0
 
 
 # --- Valeurs propres à chaque instance -------------------------------------
@@ -113,15 +132,24 @@ var _flicker_factor: float = 1.0
 var _heat_effect: Node2D
 var _frost_effect: Node2D
 
-## Ouvertures pour une porte dans les murs gauche et droit (réglées par le vaisseau).
-@export var door_left: bool = true:
+## Place du module dans le vaisseau : coin supérieur gauche, en cases.
+## Le vaisseau en déduit la position, les murs, les portes et les voisins.
+@export var grid_position: Vector2i = Vector2i.ZERO:
 	set(value):
-		door_left = value
-		queue_redraw()
-@export var door_right: bool = true:
+		grid_position = value
+		var ship := get_parent()
+		if ship != null and ship.has_method("arrange_modules"):
+			ship.arrange_modules()
+
+## Ouvertures des portes, réglées par le vaisseau : liste de [côté (Side),
+## position du centre de l'ouverture le long de ce côté (px)].
+var doorways: Array = []:
 	set(value):
-		door_right = value
+		doorways = value
 		queue_redraw()
+
+## Modules adjacents reliés par une porte (réglés par le vaisseau).
+var neighbors: Array[Module] = []
 
 
 # --- Caractéristiques du type (à définir dans chaque classe fille) ---------
@@ -132,9 +160,6 @@ var _frost_effect: Node2D
 ## Consommation électrique idéale (W).
 @abstract func get_ideal_power() -> float
 
-## Taille en cases (1 case = taille du personnage).
-@abstract func get_size() -> Vector2i
-
 ## Pannes pouvant survenir dans ce type de module (à définir ultérieurement).
 @abstract func get_possible_failures() -> Array[StringName]
 
@@ -143,6 +168,12 @@ var _frost_effect: Node2D
 ## l'alimentation optimale. Une classe fille peut la redéfinir.
 func get_min_power() -> float:
 	return get_ideal_power() * 0.5
+
+
+## Taille en cases (1 case = taille du personnage) : DEFAULT_SIZE par défaut.
+## Une classe fille peut la redéfinir.
+func get_size() -> Vector2i:
+	return DEFAULT_SIZE
 
 
 # --- Méthodes communes -------------------------------------------------------
@@ -289,24 +320,37 @@ func _set_effect_strength(layer: Node2D, active: bool, progress: float) -> void:
 
 
 ## Murs du module sous forme de segments [début, fin] en coordonnées locales,
-## avec une ouverture au milieu des murs gauche/droit qui ont une porte.
+## interrompus à chaque ouverture de porte ([member doorways]). Les murs du
+## haut et du bas débordent d'une demi-épaisseur pour fermer les coins.
 ## Le vaisseau s'en sert aussi pour construire les collisions et les ombres.
 func get_wall_lines() -> Array:
 	var size := get_pixel_size()
 	var half_t := WALL_THICKNESS / 2.0
-	var lines := [
-		[Vector2(-half_t, 0), Vector2(size.x + half_t, 0)],
-		[Vector2(-half_t, size.y), Vector2(size.x + half_t, size.y)],
-	]
-	var gap_top := (size.y - DOOR_SIZE) / 2.0
-	var gap_bottom := gap_top + DOOR_SIZE
-	for side in [[0.0, door_left], [size.x, door_right]]:
-		var x: float = side[0]
-		if side[1]:
-			lines.append([Vector2(x, 0), Vector2(x, gap_top)])
-			lines.append([Vector2(x, gap_bottom), Vector2(x, size.y)])
-		else:
-			lines.append([Vector2(x, 0), Vector2(x, size.y)])
+	var lines := []
+	for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		var horizontal: bool = side == SIDE_TOP or side == SIDE_BOTTOM
+		var length := size.x if horizontal else size.y
+		var start := -half_t if horizontal else 0.0
+		var end := length + half_t if horizontal else length
+		var gaps: Array[float] = []
+		for doorway in doorways:
+			if doorway[0] == side:
+				gaps.append(doorway[1])
+		gaps.sort()
+		var cuts: Array[float] = [start]
+		for center in gaps:
+			cuts.append(center - DOOR_SIZE / 2.0)
+			cuts.append(center + DOOR_SIZE / 2.0)
+		cuts.append(end)
+		for i in range(0, cuts.size(), 2):
+			if cuts[i + 1] - cuts[i] < 0.5:
+				continue
+			if horizontal:
+				var y := 0.0 if side == SIDE_TOP else size.y
+				lines.append([Vector2(cuts[i], y), Vector2(cuts[i + 1], y)])
+			else:
+				var x := 0.0 if side == SIDE_LEFT else size.x
+				lines.append([Vector2(x, cuts[i]), Vector2(x, cuts[i + 1])])
 	return lines
 
 
@@ -321,19 +365,16 @@ func _draw() -> void:
 	for j in range(1, get_size().y):
 		draw_line(Vector2(0, j * CELL_SIZE), Vector2(size.x, j * CELL_SIZE), GRID_COLOR)
 
-	# Schéma propre au type de module, agrandi et centré dans la salle.
-	var k := minf(size.x, size.y) / DETAILS_REFERENCE
-	draw_set_transform((size - Vector2(k, k) * DETAILS_REFERENCE) / 2.0, 0.0, Vector2(k, k))
-	_draw_details(Rect2(0, 0, DETAILS_REFERENCE, DETAILS_REFERENCE))
-	draw_set_transform(Vector2.ZERO)
+	# Aménagement propre au type de module, à l'échelle réelle.
+	_draw_details(rect)
 
 	# Murs (avec les ouvertures des portes).
 	for line in get_wall_lines():
 		draw_line(line[0], line[1], WALL_COLOR, WALL_THICKNESS)
 
-	# Nom du module.
-	draw_string(ThemeDB.fallback_font, Vector2(0, 48), get_type_name(),
-			HORIZONTAL_ALIGNMENT_CENTER, size.x, 28, TEXT_COLOR)
+	# Nom du module, en haut à gauche (le milieu des murs accueille les portes).
+	draw_string(ThemeDB.fallback_font, Vector2(CELL_SIZE * 0.75, CELL_SIZE * 0.9), get_type_name(),
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, TEXT_COLOR)
 
 	# Jauge d'alimentation : uniquement en mode débogage (voir debug_mode.gd).
 	if DebugMode.is_enabled():
@@ -376,7 +417,38 @@ func _draw_battery() -> void:
 			HORIZONTAL_ALIGNMENT_CENTER, text_w, 13, TEXT_COLOR.darkened(0.3))
 
 
-## Dessin schématique propre à chaque type (facultatif à surcharger).
-## [param _rect] est la boîte de référence (DETAILS_REFERENCE × DETAILS_REFERENCE).
+## Aménagement propre à chaque type (facultatif à surcharger), dessiné à
+## l'échelle réelle dans [param _rect] (la salle entière, en px).
+## Convention : le milieu de chaque mur peut recevoir une porte, on laisse donc
+## libre une croix de passage centrale (cases 6 à 10) ; les meubles occupent
+## les quatre quarts, l'emblème du type est peint au sol au centre.
+## Le coin supérieur gauche (cases 0 à 2) accueille le nom et la jauge.
 func _draw_details(_rect: Rect2) -> void:
 	pass
+
+
+## Rectangle en cases converti en pixels (coordonnées locales).
+static func cells(x: float, y: float, w: float, h: float) -> Rect2:
+	return Rect2(x * CELL_SIZE, y * CELL_SIZE, w * CELL_SIZE, h * CELL_SIZE)
+
+
+## Point en cases converti en pixels.
+static func cell_point(x: float, y: float) -> Vector2:
+	return Vector2(x, y) * CELL_SIZE
+
+
+## Meuble : aplat sombre cerclé de [param accent].
+func _draw_furniture(r: Rect2, accent: Color) -> void:
+	draw_rect(r, FURNITURE_COLOR)
+	draw_rect(r, accent, false, FURNITURE_OUTLINE)
+
+
+## Meuble rond : disque sombre cerclé de [param accent].
+func _draw_round_furniture(center: Vector2, radius: float, accent: Color) -> void:
+	draw_circle(center, radius, FURNITURE_COLOR)
+	draw_arc(center, radius, 0.0, TAU, 48, accent, FURNITURE_OUTLINE)
+
+
+## Couleur d'emblème au sol : [param accent] en transparence.
+static func emblem_color(accent: Color) -> Color:
+	return Color(accent, EMBLEM_ALPHA)
