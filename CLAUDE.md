@@ -41,18 +41,35 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 - Tests scriptés : un `SceneTree` passé par `--script <fichier.gd> -- --host` charge
   `main.tscn`, agit sur les nœuds et peut enregistrer des captures
   (`root.get_texture().get_image().save_png(...)`). Garder ces scripts hors du dépôt.
+  - Les arguments après `--` se lisent avec `OS.get_cmdline_user_args()`.
+  - `multiplayer` n'existe pas dans un `SceneTree` : passer par
+    `current_scene.multiplayer`.
+  - Simuler une touche : `Input.parse_input_event` avec un `InputEventAction`
+    (ex. `interact`).
+  - `--lang=en` pour des captures en anglais sans toucher au choix mémorisé.
 - Réseau : un hôte et un client `--headless` lancés à quelques secondes d'écart ;
   trafic lu avec `ENetConnection.pop_statistic(HOST_TOTAL_SENT_DATA, ...)`.
+  - Le port 7777 est souvent pris par des parties lancées depuis l'éditeur de
+    l'utilisateur (ne pas les fermer) : `create_server` échoue (« Couldn't create
+    an ENet host ») et le client rejoint l'ancienne version. Créer alors les pairs
+    dans le script de test sur un autre port (`ENetMultiplayerPeer`, puis appeler
+    `Ship.randomize_module_states`, `Network._spawn_player`, brancher
+    `peer_connected` sur `Network._on_peer_connected`).
+  - L'hôte de test doit vivre plus longtemps que le client : à sa fermeture, le
+    client recharge la scène et perd l'état reçu.
 - Pas de tests automatisés : vérifier aussi en jeu, à deux instances pour tout ce
   qui touche au réseau.
 
 ## Architecture
 
 Fichiers rangés **par fonctionnalité** (scène, script et shaders ensemble) :
-`core/` (réseau, mode debug), `ship/` (vaisseau, portes, `rules/`, `modules/`
-et leurs `shaders/`), `player/`, `world/` (fond étoilé, brouillard), `ui/`
-(interface), `i18n/` (traductions), `assets/`
-pour les futures ressources. Racine : `main.tscn` et fichiers du projet.
+- `core/` : réseau, langue, mode debug ;
+- `ship/` : vaisseau, portes, `rules/` (alimentation, température), `modules/`
+  et leurs `shaders/` ;
+- `player/` ; `world/` (fond étoilé, brouillard) ; `ui/` (interface) ;
+  `i18n/` (traductions) ; `assets/` pour les futures ressources.
+- Racine : `main.tscn` et fichiers du projet.
+
 Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 (`preload`) et les `.tscn`.
 
@@ -69,7 +86,8 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   `grid_position` (cases, réglée dans la scène). `doorways` et `neighbors` sont
   calculés par le vaisseau.
 - Dessin : sol quadrillé, aménagement du type (`_draw_details`, à l'échelle réelle),
-  murs, nom en haut à gauche, jauge et températures (debug seulement).
+  zone d'interaction, murs, nom traduit en haut à gauche, jauge (verte, rouge sous
+  le minimum) et températures (debug seulement).
 - **Style des salles** (minimaliste) : une couleur `ACCENT` par type ; meubles en
   aplat sombre cerclés de cette couleur (`_draw_furniture`,
   `_draw_round_furniture`) dans les quatre zones `QUADRANTS` ; emblème au sol en
@@ -115,7 +133,9 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - Chacune rejoint sa cible à une vitesse (°C/s) lente sous un petit écart, rapide
   au-delà d'un grand écart, linéaire entre les deux (`_approach`, constantes
   `MACHINE_*` / `ROOM_*`). Mise à jour au même pas que l'alimentation.
-- N'a pour l'instant qu'un effet visuel.
+- N'a pour l'instant qu'un effet visuel. Avec un optimum de 100 W, la machine
+  plafonne à 50 °C et la pièce à 30 °C : ni chaleur (`HEAT_THRESHOLD`) ni givre
+  (`FROST_THRESHOLD`) ne se déclenchent actuellement.
 
 ### Portes — `ship/door.gd`
 - S'ouvrent quand un `CharacterBody2D` entre dans leur zone, se referment
@@ -151,8 +171,8 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - Action `interact` (Espace, clic droit ; `project.godot`) dans la zone
   d'interaction d'un module (`Module.get_interaction_rect`, 2 × 2 cases au centre) :
   ouvre la fenêtre ; même action pour la fermer. Indication en bas d'écran.
-- Centre : `Module.build_interface` (bouton d'exemple par défaut, à redéfinir par
-  type). Côté : état (« Intact » si `state` > `BROKEN_THRESHOLD`, sinon « Cassé »),
+- Centre : `Module.build_interface` (bouton d'exemple par défaut) ; pour des
+  éléments propres à un type, la redéfinir dans son `module_*.gd`. Côté : état (« Intact » si `state` > `BROKEN_THRESHOLD`, sinon « Cassé »),
   consommation, températures de la machine et de la pièce.
 - `ModuleWindow.is_open` immobilise le personnage local. Les boutons de la
   fenêtre ne prennent pas le focus (Espace sert à fermer).
@@ -174,3 +194,6 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - Surchauffe et surtension à venir : le code d'éclairage orangé (au-delà de
   l'optimum) reste en place, bien que la recharge soit plafonnée à l'optimum.
 - Le mobilier est seulement dessiné : il ne bloque pas les déplacements.
+- Effets de chaleur et de givre inaccessibles avec les puissances actuelles (voir
+  Température) : seuils ou règles à revoir avec la surchauffe.
+- Un message de connexion déjà affiché ne change pas de langue avant le suivant.
