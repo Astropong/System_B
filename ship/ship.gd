@@ -8,38 +8,52 @@ extends Node2D
 ## Pour changer la composition, ajoutez ou supprimez des modules enfants dans
 ## la scène et réglez leur position dans la grille.
 ##
-## Multijoueur : chaque joueur fait avancer le vaisseau lui-même à la vitesse
-## [member speed]. L'hôte fait autorité : il envoie chaque changement de vitesse
-## (avec la position), et une correction de position toutes les
-## MOTION_SYNC_INTERVAL secondes ; les autres résorbent l'écart en douceur.
+##
+## Multijoueur : chaque joueur fait avancer et tourner le vaisseau lui-même, à
+## [member speed] et [member angular_speed]. L'hôte fait autorité : il envoie
+## chaque changement de vitesse (avec la position et l'orientation), et une
+## correction de position et d'orientation toutes les MOTION_SYNC_INTERVAL
+## secondes ; les autres résorbent l'écart en douceur. Tous les joueurs voient
+## ainsi le vaisseau sous la même orientation.
 ## L'hôte applique aussi les règles d'alimentation (voir power_rules.gd)
 ## PowerRules.UPDATE_RATE fois par seconde, puis les règles de température
 ## (voir temperature_rules.gd), et envoie le résultat aux autres.
 
 ## Intervalle (s) entre deux corrections de position envoyées par l'hôte.
 const MOTION_SYNC_INTERVAL := 1.0
-## Vitesse de résorption d'un écart de position (proportion par seconde).
+## Vitesse de résorption d'un écart de position ou d'orientation (proportion par seconde).
 const CORRECTION_RATE := 2.0
 ## Au-delà de cet écart (px), la position est corrigée d'un coup.
 const CORRECTION_SNAP_DISTANCE := 96.0
+## Au-delà de cet écart (degrés), l'orientation est corrigée d'un coup.
+const CORRECTION_SNAP_ANGLE := 10.0
 ## Longueur minimale (cases) d'un mur partagé pour y placer une porte.
 const MIN_SHARED_WALL := 4
 
-## Vitesse d'avancée du vaisseau vers la droite, en pixels par seconde
-## (1 case = 48 px). Peut varier en cours de partie : à modifier sur l'hôte,
-## qui transmet le changement aux autres joueurs.
+## Vitesse d'avancée du vaisseau vers la droite de l'écran, en pixels par
+## seconde (1 case = 48 px). Peut varier en cours de partie : à modifier sur
+## l'hôte, qui transmet le changement aux autres joueurs.
 @export var speed: float = 10.0:
 	set(value):
 		if value == speed:
 			return
 		speed = value
-		if is_inside_tree() and not Engine.is_editor_hint() and is_multiplayer_authority():
-			_receive_motion.rpc(position, speed)
+		_send_motion_change()
+
+## Vitesse de rotation du vaisseau, en degrés par seconde (positif : sens
+## horaire à l'écran). Même fonctionnement que [member speed].
+@export var angular_speed: float = 10.0:
+	set(value):
+		if value == angular_speed:
+			return
+		angular_speed = value
+		_send_motion_change()
 
 var _arranging: bool = false
-var _power_timer: float = 0.0
+var _rules_timer: float = 0.0
 var _motion_timer: float = 0.0
 var _position_error := Vector2.ZERO
+var _rotation_error: float = 0.0  # radians
 
 
 func _ready() -> void:
@@ -51,60 +65,85 @@ func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
 	position.x += speed * delta
+	# Angle non replié dans [-180°, 180°] : le saut de 360° serait interpolé.
+	rotation += deg_to_rad(angular_speed) * delta
 	if is_multiplayer_authority():
-		_update_power(delta)
+		_update_module_rules(delta)
 		_motion_timer += delta
 		if _motion_timer >= MOTION_SYNC_INTERVAL:
 			_motion_timer = 0.0
-			_receive_position.rpc(position)
+			_receive_position.rpc(position, rotation)
 	else:
 		_apply_correction(delta)
 
 
-## Envoie la position et la vitesse du vaisseau à un joueur qui vient d'arriver (hôte).
+## Envoie le mouvement du vaisseau à un joueur qui vient d'arriver (hôte).
 func send_motion_to(peer_id: int) -> void:
-	_receive_motion.rpc_id(peer_id, position, speed)
+	_receive_motion.rpc_id(peer_id, position, rotation, speed, angular_speed)
+
+
+func _send_motion_change() -> void:
+	if is_inside_tree() and not Engine.is_editor_hint() and is_multiplayer_authority():
+		_receive_motion.rpc(position, rotation, speed, angular_speed)
 
 
 ## Changement de vitesse (ou arrivée dans la partie) : envoi fiable.
 @rpc("authority", "call_remote", "reliable")
-func _receive_motion(new_position: Vector2, new_speed: float) -> void:
+func _receive_motion(new_position: Vector2, new_rotation: float, new_speed: float,
+		new_angular_speed: float) -> void:
 	speed = new_speed
-	_correct_to(new_position)
+	angular_speed = new_angular_speed
+	_correct_to(new_position, new_rotation)
 
 
 ## Correction périodique : une correction perdue est remplacée par la suivante.
 @rpc("authority", "call_remote", "unreliable_ordered")
-func _receive_position(new_position: Vector2) -> void:
-	_correct_to(new_position)
+func _receive_position(new_position: Vector2, new_rotation: float) -> void:
+	_correct_to(new_position, new_rotation)
 
 
-func _correct_to(new_position: Vector2) -> void:
+func _correct_to(new_position: Vector2, new_rotation: float) -> void:
+	var snapped := false
 	_position_error = new_position - position
 	if _position_error.length() > CORRECTION_SNAP_DISTANCE:
 		position = new_position
 		_position_error = Vector2.ZERO
+		snapped = true
+	_rotation_error = angle_difference(rotation, new_rotation)
+	if absf(_rotation_error) > deg_to_rad(CORRECTION_SNAP_ANGLE):
+		rotation = new_rotation
+		_rotation_error = 0.0
+		snapped = true
+	# Saut : à afficher tel quel, sans interpolation depuis l'ancienne position.
+	if snapped:
+		reset_physics_interpolation()
 
 
 func _apply_correction(delta: float) -> void:
-	if _position_error == Vector2.ZERO:
-		return
-	var step := _position_error * minf(1.0, CORRECTION_RATE * delta)
-	if step.length() < 0.01:
-		step = _position_error
-	position += step
-	_position_error -= step
+	if _position_error != Vector2.ZERO:
+		var step := _position_error * minf(1.0, CORRECTION_RATE * delta)
+		if step.length() < 0.01:
+			step = _position_error
+		position += step
+		_position_error -= step
+	if _rotation_error != 0.0:
+		var turn := _rotation_error * minf(1.0, CORRECTION_RATE * delta)
+		if absf(turn) < 0.00001:
+			turn = _rotation_error
+		rotation += turn
+		_rotation_error -= turn
 
 
-## Alimentation : mise à jour à intervalle fixe (hôte uniquement).
-func _update_power(delta: float) -> void:
+## Alimentation puis température des modules : mise à jour à intervalle fixe
+## (hôte uniquement), résultat envoyé aux autres en un seul message.
+func _update_module_rules(delta: float) -> void:
 	var step := 1.0 / PowerRules.UPDATE_RATE
-	_power_timer += delta
-	if _power_timer < step:
+	_rules_timer += delta
+	if _rules_timer < step:
 		return
 	var modules := get_modules()
-	while _power_timer >= step:
-		_power_timer -= step
+	while _rules_timer >= step:
+		_rules_timer -= step
 		PowerRules.update(modules, step)
 		TemperatureRules.update(modules, step)
 
@@ -116,11 +155,11 @@ func _update_power(delta: float) -> void:
 		power.append(m.power_supplied)
 		room_temperatures.append(m.room_temperature)
 		machine_temperatures.append(m.machine_temperature)
-	_receive_modules_state.rpc(power, room_temperatures, machine_temperatures)
+	_receive_power_and_temperatures.rpc(power, room_temperatures, machine_temperatures)
 
 
 @rpc("authority", "call_remote", "unreliable_ordered")
-func _receive_modules_state(power: PackedFloat32Array, room_temperatures: PackedFloat32Array,
+func _receive_power_and_temperatures(power: PackedFloat32Array, room_temperatures: PackedFloat32Array,
 		machine_temperatures: PackedFloat32Array) -> void:
 	var modules := get_modules()
 	for i in mini(power.size(), modules.size()):

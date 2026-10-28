@@ -4,9 +4,10 @@ class_name Module
 extends Node2D
 ## Classe abstraite de base pour toutes les salles (modules) du vaisseau.
 ##
-## Les caractéristiques du TYPE (identifiant, consommation idéale, taille,
-## pannes possibles) sont fournies par chaque classe fille via les méthodes
-## abstraites ci-dessous. Les valeurs propres à CHAQUE INSTANCE (puissance
+## Les caractéristiques du TYPE (identifiant, consommation idéale, pannes
+## possibles) sont fournies par chaque classe fille via les méthodes abstraites
+## ci-dessous ; la taille et l'alimentation minimale ont une valeur par défaut,
+## redéfinissable. Les valeurs propres à CHAQUE INSTANCE (puissance
 ## fournie, températures de la machine et de la pièce, état, place dans le
 ## vaisseau) sont des variables de cette classe.
 
@@ -125,11 +126,10 @@ const QUADRANT_SIZE := 3.0
 		machine_temperature = clampf(value, TEMPERATURE_MIN, TEMPERATURE_MAX)
 		queue_redraw()
 
-## État du module : 1 = intact, 0 = détruit.
+## État du module : 1 = intact, 0 = détruit (voir is_intact).
 @export_range(0.0, 1.0, 0.01) var state: float = 1.0:
 	set(value):
 		state = clampf(value, 0.0, 1.0)
-		queue_redraw()
 
 var _lamps: Node2D
 var _light_color: Color = Color.WHITE
@@ -143,9 +143,7 @@ var _frost_effect: Node2D
 @export var grid_position: Vector2i = Vector2i.ZERO:
 	set(value):
 		grid_position = value
-		var ship := get_parent()
-		if ship != null and ship.has_method("arrange_modules"):
-			ship.arrange_modules()
+		_request_arrangement()
 
 ## Ouvertures des portes, réglées par le vaisseau : liste de [côté (Side),
 ## position du centre de l'ouverture le long de ce côté (px)].
@@ -225,6 +223,15 @@ func _notification(what: int) -> void:
 ## Taille du module en pixels.
 func get_pixel_size() -> Vector2:
 	return Vector2(get_size()) * CELL_SIZE
+
+
+## À appeler quand la place ou la taille du module change : le vaisseau
+## replace alors ses modules et reconstruit murs et portes.
+func _request_arrangement() -> void:
+	queue_redraw()
+	var ship := get_parent()
+	if ship != null and ship.has_method("arrange_modules"):
+		ship.arrange_modules()
 
 
 func _ready() -> void:

@@ -36,7 +36,10 @@ func _visible_tiles() -> Rect2i:
 	var camera := get_viewport().get_camera_2d() if not Engine.is_editor_hint() else null
 	if camera:
 		center = camera.get_screen_center_position()
-		half = get_viewport_rect().size / camera.zoom / 2.0
+		# La caméra peut être tournée (elle suit le vaisseau) : on couvre le
+		# disque circonscrit à l'écran, quelle que soit l'orientation.
+		var radius := (get_viewport_rect().size / camera.zoom / 2.0).length()
+		half = Vector2(radius, radius)
 	var from := ((center - half) / tile_size).floor()
 	var to := ((center + half) / tile_size).floor()
 	return Rect2i(Vector2i(from), Vector2i(to - from) + Vector2i.ONE)

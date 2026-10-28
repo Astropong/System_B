@@ -113,12 +113,23 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   avec une porte au milieu de la partie commune (verticale ou pivotée de 90°).
 - Le nœud `Structure` (généré, non sauvegardé) contient les collisions des murs, les
   `LightOccluder2D` (murs fusionnés par droite : `_merge_wall_lines`) et les `Door`.
-- Avance à `speed`, **simulé par chaque joueur**. Changer `speed` sur l'hôte envoie
-  position + vitesse aux autres ; l'hôte corrige aussi la position toutes les
-  `MOTION_SYNC_INTERVAL` s, écart résorbé en douceur.
-- Les joueurs sont enfants de `Ship/Crew` : coordonnées dans le repère du vaisseau.
+- Avance à `speed` (vers la droite de l'écran) et tourne à `angular_speed` (°/s),
+  **simulé par chaque joueur**. Changer l'une des vitesses sur l'hôte envoie
+  position, orientation et vitesses aux autres (`_receive_motion`) ; l'hôte
+  corrige aussi position et orientation toutes les `MOTION_SYNC_INTERVAL` s
+  (`_receive_position`), écart résorbé en douceur, ou d'un coup au-delà de
+  `CORRECTION_SNAP_DISTANCE` / `CORRECTION_SNAP_ANGLE`.
+- Les joueurs sont enfants de `Ship/Crew` : coordonnées dans le repère du vaisseau
+  (qui tourne). La caméra du joueur tourne avec le vaisseau (`ignore_rotation`
+  désactivé dans `player.tscn`) : le vaisseau reste droit à l'écran, l'espace tourne.
+- **Interpolation physique** activée (`physics/common/physics_interpolation`) :
+  sans elle, la rotation par pas physiques fait trembler l'image. Conséquences :
+  - déplacer les nœuds en `_physics_process`, pas en `_process` ;
+  - après un saut (correction d'un coup), appeler `reset_physics_interpolation()` ;
+  - ne pas replier les angles (un saut de 360° serait interpolé) ;
+  - caméra en mode physique (`process_callback`), sans lissage de position.
 - L'hôte applique alimentation puis température `PowerRules.UPDATE_RATE` fois par
-  seconde, et envoie tout en un RPC (`_receive_modules_state`, non fiable ordonné).
+  seconde, et envoie tout en un RPC (`_receive_power_and_temperatures`, non fiable ordonné).
 
 ### Alimentation — `ship/rules/power_rules.gd`
 - Le Générateur est toujours à l'optimum.
@@ -151,6 +162,9 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   machine simule le déplacement. Position finale à l'arrêt, correction toutes les
   `CORRECTION_INTERVAL` s pendant un déplacement.
   - `Player._compute_velocity` doit rester **identique sur toutes les machines**.
+    Les ordres (flèches, cible souris) sont dans le repère du vaisseau, qui est
+    celui de l'écran ; la vitesse renvoyée est tournée de l'orientation du
+    vaisseau (`_get_ship_rotation`), car `move_and_slide` agit dans le repère du monde.
 - **Joueur qui arrive** : `Network._on_peer_connected` lui envoie l'état du vaisseau,
   l'état des modules, les portes et les personnages. Toute nouvelle donnée
   synchronisée doit y être ajoutée.

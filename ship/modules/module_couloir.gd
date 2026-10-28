@@ -10,10 +10,7 @@ const ACCENT := Color(0.9, 0.75, 0.2, 0.45)
 @export var size_cells: Vector2i = Vector2i(8, 16):
 	set(value):
 		size_cells = value
-		queue_redraw()
-		var ship := get_parent()
-		if ship != null and ship.has_method("arrange_modules"):
-			ship.arrange_modules()
+		_request_arrangement()
 
 
 func get_type_id() -> Module.ModuleType:

@@ -26,8 +26,9 @@ script = ExtResource("1_player")
 shape = SubResource("CircleShape2D_player")
 
 [node name="Camera2D" type="Camera2D" parent="."]
+ignore_rotation = false
+process_callback = 0
 enabled = false
-position_smoothing_enabled = true
 
 [node name="VisionLight" type="PointLight2D" parent="."]
 enabled = false

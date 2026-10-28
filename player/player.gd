@@ -3,8 +3,10 @@ extends CharacterBody2D
 ## Personnage vu de dessus, dessiné comme un rond.
 ## - Flèches du clavier : déplacement direct.
 ## - Clic gauche (ou bouton maintenu) : le personnage se rend vers la souris.
-## Il est placé dans le vaisseau (nœud Ship/Crew) : il avance avec lui, et sa
-## position comme sa cible sont exprimées dans le repère du vaisseau.
+## Il est placé dans le vaisseau (nœud Ship/Crew) : il avance et tourne avec
+## lui, et sa position comme sa cible sont exprimées dans le repère du vaisseau.
+## La caméra tourne avec le vaisseau (ignore_rotation désactivé) : le vaisseau
+## reste droit à l'écran, c'est l'espace autour qui tourne.
 ##
 ## Multijoueur : le nom du nœud est l'identifiant réseau du joueur, qui fait
 ## autorité sur son personnage. Seul le personnage local lit les commandes et
@@ -108,16 +110,27 @@ func _read_input() -> void:
 
 
 ## Vitesse selon l'ordre en cours ; identique sur toutes les machines.
+## Les ordres (direction des flèches, cible) sont dans le repère du vaisseau,
+## qui est aussi celui de l'écran puisque la caméra tourne avec lui ;
+## move_and_slide applique la vitesse dans le repère du monde : on la tourne
+## donc de l'orientation du vaisseau (synchronisée entre les joueurs).
 func _compute_velocity(delta: float) -> Vector2:
+	var ship_rotation := _get_ship_rotation()
 	if input_dir != Vector2.ZERO:
-		return input_dir * speed
+		return input_dir.rotated(ship_rotation) * speed
 	if has_target:
 		var to_target := target - position
 		if to_target.length() <= speed * delta:
 			has_target = false
-			return to_target / delta  # dernier petit pas pile sur la cible
-		return to_target.normalized() * speed
+			return (to_target / delta).rotated(ship_rotation)  # dernier petit pas pile sur la cible
+		return to_target.normalized().rotated(ship_rotation) * speed
 	return Vector2.ZERO
+
+
+## Orientation (radians) du repère du personnage, c'est-à-dire du vaisseau.
+func _get_ship_rotation() -> float:
+	var parent := get_parent() as Node2D
+	return parent.global_rotation if parent else 0.0
 
 
 ## Joueur local : envoie l'ordre quand il change (dont l'arrêt), et des
@@ -180,6 +193,7 @@ func _correct_to(at: Vector2) -> void:
 	if _position_error.length() > CORRECTION_SNAP_DISTANCE:
 		position = at
 		_position_error = Vector2.ZERO
+		reset_physics_interpolation()  # saut : pas d'interpolation
 
 
 func _apply_correction(delta: float) -> void:
@@ -202,6 +216,8 @@ func _draw() -> void:
 	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 48, color.darkened(0.4), 3.0)
 	# La cible n'est montrée qu'à son propre joueur.
 	if has_target and is_multiplayer_authority():
-		var t := target - position  # le vaisseau n'est ni tourné ni agrandi
+		# Le personnage n'est ni tourné ni agrandi dans le vaisseau : son repère
+		# local a l'orientation du vaisseau, comme la cible.
+		var t := target - position
 		draw_arc(t, 8.0, 0.0, TAU, 24, Color.WHITE, 2.0)
 		draw_line(Vector2.ZERO, t, Color(1, 1, 1, 0.25), 1.0)
