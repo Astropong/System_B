@@ -46,8 +46,8 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 - **À fournir par chaque type** : `get_type_id()`, `get_ideal_power()` (W),
   `get_size()` (cases), `get_possible_failures()`. `get_min_power()` vaut par défaut
   la moitié de l'optimale.
-- **Valeurs d'instance** : `power_supplied` (W), `temperature` (°C, entier),
-  `state` (0–1).
+- **Valeurs d'instance** : `power_supplied` (W), `room_temperature` et
+  `machine_temperature` (°C, réels, affichés arrondis), `state` (0–1).
 - Dessin : sol quadrillé, schéma du type (`_draw_details`, boîte de référence
   `DETAILS_REFERENCE` agrandie), murs, nom, jauge et température (debug seulement).
 - **Éclairage** selon l'alimentation (`_update_lighting`) : rouge sous le minimum,
@@ -56,7 +56,7 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
   rendraient les pièces visibles à travers les murs (brouillard de guerre cassé).
 - **Effets de température** (`_create_climate_effects`, shaders
   `heat_haze.gdshader` / `frost.gdshader`) : déformation au-dessus de
-  `HEAT_THRESHOLD`, givre en dessous de `FROST_THRESHOLD`.
+  `HEAT_THRESHOLD`, givre en dessous de `FROST_THRESHOLD` (température de la pièce).
   - La déformation relit l'écran : `BackBufferCopy` en mode **viewport** (le mode
     rectangle laisse des bandes noires) et `render_mode unshaded` (l'image lue est
     déjà assombrie par le brouillard).
@@ -80,7 +80,11 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
   alimentation minimale. Sinon il garde sa charge.
 
 ### Température — `temperature_rules.gd`
-- `BASE_TEMPERATURE` (0 °C) + 1 °C par tranche de `WATTS_PER_DEGREE` W.
+- Machine : cible = puissance / `MACHINE_WATTS_PER_DEGREE`.
+- Pièce : cible = `ROOM_BASE_TEMPERATURE` + machine / `ROOM_MACHINE_DIVISOR`.
+- Chacune rejoint sa cible à une vitesse (°C/s) lente sous un petit écart, rapide
+  au-delà d'un grand écart, linéaire entre les deux (`_approach`, constantes
+  `MACHINE_*` / `ROOM_*`). Mise à jour au même pas que l'alimentation.
 - N'a pour l'instant qu'un effet visuel.
 
 ### Portes — `door.gd`

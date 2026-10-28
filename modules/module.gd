@@ -7,7 +7,8 @@ extends Node2D
 ## Les caractéristiques du TYPE (identifiant, consommation idéale, taille,
 ## pannes possibles) sont fournies par chaque classe fille via les méthodes
 ## abstraites ci-dessous. Les valeurs propres à CHAQUE INSTANCE (puissance
-## fournie, température, état) sont des variables de cette classe.
+## fournie, températures de la machine et de la pièce, état) sont des variables
+## de cette classe.
 
 enum ModuleType { PILOTAGE, INFIRMERIE, REACTEUR, COULOIR, RADAR, GENERATEUR }
 
@@ -84,11 +85,19 @@ const DETAILS_REFERENCE := 240.0
 		power_supplied = maxf(value, 0.0)
 		queue_redraw()
 
-## Température du module (°C, entier), bornée entre TEMPERATURE_MIN et TEMPERATURE_MAX.
-@export_range(-273, 227, 1, "suffix:°C") var temperature: int = 0:
+## Température de la pièce du module (°C), bornée entre TEMPERATURE_MIN et
+## TEMPERATURE_MAX. Commande les effets de chaleur et de gel.
+@export_range(-273, 227, 0.1, "suffix:°C") var room_temperature: float = TemperatureRules.ROOM_BASE_TEMPERATURE:
 	set(value):
-		temperature = clampi(value, TEMPERATURE_MIN, TEMPERATURE_MAX)
+		room_temperature = clampf(value, TEMPERATURE_MIN, TEMPERATURE_MAX)
 		_update_climate_effects()
+		queue_redraw()
+
+## Température de la machine du module (°C), bornée entre TEMPERATURE_MIN et
+## TEMPERATURE_MAX. Réchauffe la pièce (voir temperature_rules.gd).
+@export_range(-273, 227, 0.1, "suffix:°C") var machine_temperature: float = TemperatureRules.ROOM_BASE_TEMPERATURE:
+	set(value):
+		machine_temperature = clampf(value, TEMPERATURE_MIN, TEMPERATURE_MAX)
 		queue_redraw()
 
 ## État du module : 1 = intact, 0 = détruit.
@@ -266,10 +275,10 @@ func _create_effect_layer(layer_name: String, shader: Shader, rect: Rect2) -> No
 func _update_climate_effects() -> void:
 	if _heat_effect == null:
 		return
-	_set_effect_strength(_heat_effect, temperature > HEAT_THRESHOLD,
-			inverse_lerp(HEAT_THRESHOLD, HEAT_FULL, temperature))
-	_set_effect_strength(_frost_effect, temperature < FROST_THRESHOLD,
-			inverse_lerp(FROST_THRESHOLD, FROST_FULL, temperature))
+	_set_effect_strength(_heat_effect, room_temperature > HEAT_THRESHOLD,
+			inverse_lerp(HEAT_THRESHOLD, HEAT_FULL, room_temperature))
+	_set_effect_strength(_frost_effect, room_temperature < FROST_THRESHOLD,
+			inverse_lerp(FROST_THRESHOLD, FROST_FULL, room_temperature))
 
 
 func _set_effect_strength(layer: Node2D, active: bool, progress: float) -> void:
@@ -361,8 +370,10 @@ func _draw_battery() -> void:
 			HORIZONTAL_ALIGNMENT_CENTER, text_w, 16, TEXT_COLOR)
 	draw_string(font, Vector2(text_x, rect.end.y + 40), "opt. %d W" % roundi(get_ideal_power()),
 			HORIZONTAL_ALIGNMENT_CENTER, text_w, 13, TEXT_COLOR.darkened(0.3))
-	draw_string(font, Vector2(text_x, rect.end.y + 60), "%d °C" % temperature,
+	draw_string(font, Vector2(text_x, rect.end.y + 60), "pièce %d °C" % roundi(room_temperature),
 			HORIZONTAL_ALIGNMENT_CENTER, text_w, 16, TEXT_COLOR)
+	draw_string(font, Vector2(text_x, rect.end.y + 78), "mach. %d °C" % roundi(machine_temperature),
+			HORIZONTAL_ALIGNMENT_CENTER, text_w, 13, TEXT_COLOR.darkened(0.3))
 
 
 ## Dessin schématique propre à chaque type (facultatif à surcharger).

@@ -103,24 +103,29 @@ func _update_power(delta: float) -> void:
 	while _power_timer >= step:
 		_power_timer -= step
 		PowerRules.update(modules, step)
-	TemperatureRules.update(modules)
+		TemperatureRules.update(modules, step)
 
 	# Un seul petit message pour tous les modules.
 	var power := PackedFloat32Array()
-	var temperatures := PackedInt32Array()
+	var room_temperatures := PackedFloat32Array()
+	var machine_temperatures := PackedFloat32Array()
 	for m in modules:
 		power.append(m.power_supplied)
-		temperatures.append(m.temperature)
-	_receive_modules_state.rpc(power, temperatures)
+		room_temperatures.append(m.room_temperature)
+		machine_temperatures.append(m.machine_temperature)
+	_receive_modules_state.rpc(power, room_temperatures, machine_temperatures)
 
 
 @rpc("authority", "call_remote", "unreliable_ordered")
-func _receive_modules_state(power: PackedFloat32Array, temperatures: PackedInt32Array) -> void:
+func _receive_modules_state(power: PackedFloat32Array, room_temperatures: PackedFloat32Array,
+		machine_temperatures: PackedFloat32Array) -> void:
 	var modules := get_modules()
 	for i in mini(power.size(), modules.size()):
 		modules[i].power_supplied = power[i]
-	for i in mini(temperatures.size(), modules.size()):
-		modules[i].temperature = temperatures[i]
+	for i in mini(room_temperatures.size(), modules.size()):
+		modules[i].room_temperature = room_temperatures[i]
+	for i in mini(machine_temperatures.size(), modules.size()):
+		modules[i].machine_temperature = machine_temperatures[i]
 
 
 func get_modules() -> Array[Module]:
