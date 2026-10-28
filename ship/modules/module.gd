@@ -202,17 +202,24 @@ func get_interaction_rect() -> Rect2:
 ## Les boutons ne doivent pas prendre le focus (Espace ferme la fenêtre).
 func build_interface(container: Container) -> void:
 	var button := Button.new()
-	button.text = "Bouton d'exemple : %s" % get_type_name()
+	button.text = tr("Bouton d'exemple : %s") % get_type_name()
 	button.focus_mode = Control.FOCUS_NONE
 	var presses := [0]
 	button.pressed.connect(func() -> void:
 		presses[0] += 1
-		button.text = "Bouton d'exemple : %s (%d)" % [get_type_name(), presses[0]])
+		button.text = (tr("Bouton d'exemple : %s") % get_type_name()) + " (%d)" % presses[0])
 	container.add_child(button)
 
 
+## Nom du type, traduit dans la langue du jeu (voir Language).
 func get_type_name() -> String:
-	return TYPE_NAMES[get_type_id()]
+	return tr(TYPE_NAMES[get_type_id()])
+
+
+func _notification(what: int) -> void:
+	# Changement de langue : le nom et les textes de debug sont dessinés.
+	if what == NOTIFICATION_TRANSLATION_CHANGED:
+		queue_redraw()
 
 
 ## Taille du module en pixels.
@@ -445,11 +452,11 @@ func _draw_battery() -> void:
 	var text_w := rect.size.x + 60
 	draw_string(font, Vector2(text_x, rect.end.y + 22), "%d W" % roundi(power_supplied),
 			HORIZONTAL_ALIGNMENT_CENTER, text_w, 16, TEXT_COLOR)
-	draw_string(font, Vector2(text_x, rect.end.y + 40), "opt. %d W" % roundi(get_ideal_power()),
+	draw_string(font, Vector2(text_x, rect.end.y + 40), tr("opt. %d W") % roundi(get_ideal_power()),
 			HORIZONTAL_ALIGNMENT_CENTER, text_w, 13, TEXT_COLOR.darkened(0.3))
-	draw_string(font, Vector2(text_x, rect.end.y + 60), "pièce %d °C" % roundi(room_temperature),
+	draw_string(font, Vector2(text_x, rect.end.y + 60), tr("pièce %d °C") % roundi(room_temperature),
 			HORIZONTAL_ALIGNMENT_CENTER, text_w, 16, TEXT_COLOR)
-	draw_string(font, Vector2(text_x, rect.end.y + 78), "mach. %d °C" % roundi(machine_temperature),
+	draw_string(font, Vector2(text_x, rect.end.y + 78), tr("mach. %d °C") % roundi(machine_temperature),
 			HORIZONTAL_ALIGNMENT_CENTER, text_w, 13, TEXT_COLOR.darkened(0.3))
 
 

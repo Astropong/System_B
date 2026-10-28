@@ -1,11 +1,12 @@
 extends Node
-## Multijoueur en réseau (ENet) : menu Héberger / Rejoindre, apparition et
-## départ des joueurs.
+## Multijoueur en réseau (ENet) : menu Héberger / Rejoindre / Langue,
+## apparition et départ des joueurs.
 ##
 ## L'hôte (identifiant réseau 1) fait autorité sur le vaisseau et les portes ;
 ## chaque joueur fait autorité sur son propre personnage.
 ## Lancement automatique possible avec les arguments --host ou --join
-## (--join=192.168.1.20 pour une autre adresse que 127.0.0.1).
+## (--join=192.168.1.20 pour une autre adresse que 127.0.0.1), et langue
+## forcée avec --lang=en (ou fr).
 ##
 ## Serveur dédié : avec l'étiquette de fonctionnalité « dedicated_server »
 ## (export en mode « Serveur dédié », ou étiquette ajoutée à une instance de
@@ -26,9 +27,17 @@ const DEFAULT_ADDRESS := "127.0.0.1"
 @onready var _join_button: Button = %JoinButton
 @onready var _address: LineEdit = %Address
 @onready var _status: Label = %Status
+@onready var _language: OptionButton = %Language
 
 
 func _ready() -> void:
+	Language.apply_saved()
+	for arg in OS.get_cmdline_args() + OS.get_cmdline_user_args():
+		if arg.begins_with("--lang="):
+			# Langue forcée pour cette session, sans la mémoriser.
+			TranslationServer.set_locale(arg.get_slice("=", 1))
+	_setup_language_choice()
+
 	# Chaque joueur crée les personnages lui-même, à partir des données envoyées
 	# par l'hôte (identifiant et position de départ).
 	_spawner.spawn_function = _create_player
@@ -50,10 +59,19 @@ func _ready() -> void:
 			join.call_deferred(address)
 
 
+## Menu : liste des langues (noms non traduits), sur la langue actuelle.
+func _setup_language_choice() -> void:
+	for locale in Language.LOCALES:
+		_language.add_item(Language.LOCALE_NAMES[locale])
+	_language.select(Language.LOCALES.find(Language.get_current()))
+	_language.item_selected.connect(func(index: int) -> void:
+		Language.set_language(Language.LOCALES[index]))
+
+
 ## Crée la partie sur cette machine, en y jouant.
 func host() -> void:
 	if not _create_server():
-		_status.text = "Impossible d'héberger : le port %d est peut-être déjà utilisé." % DEFAULT_PORT
+		_status.text = tr("Impossible d'héberger : le port %d est peut-être déjà utilisé.") % DEFAULT_PORT
 		return
 	_spawn_player(1)
 	_menu.hide()
@@ -88,10 +106,10 @@ func join(address: String) -> void:
 	var peer := ENetMultiplayerPeer.new()
 	var error := peer.create_client(address, DEFAULT_PORT)
 	if error != OK:
-		_status.text = "Adresse invalide : %s" % address
+		_status.text = tr("Adresse invalide : %s") % address
 		return
 	multiplayer.multiplayer_peer = peer
-	_status.text = "Connexion à %s..." % address
+	_status.text = tr("Connexion à %s...") % address
 	_set_buttons_disabled(true)
 
 
@@ -145,7 +163,7 @@ func _on_connected_to_server() -> void:
 
 func _on_connection_failed() -> void:
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
-	_status.text = "Échec de la connexion."
+	_status.text = tr("Échec de la connexion.")
 	_set_buttons_disabled(false)
 
 

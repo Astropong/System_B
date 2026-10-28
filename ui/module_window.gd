@@ -64,7 +64,7 @@ func _process(_delta: float) -> void:
 	var module := _get_module_in_reach()
 	_prompt.visible = module != null
 	if module != null:
-		_prompt.text = PROMPT_TEXT % module.get_type_name()
+		_prompt.text = tr(PROMPT_TEXT) % module.get_type_name()
 
 
 ## Ouvre la fenêtre de [param module].

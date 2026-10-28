@@ -161,6 +161,20 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Rejoindre"
 
+[node name="LanguageRow" type="HBoxContainer" parent="HUD/Menu/Margin/VBox" unique_id=1450987321]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LanguageLabel" type="Label" parent="HUD/Menu/Margin/VBox/LanguageRow" unique_id=1093847562]
+layout_mode = 2
+text = "Langue"
+
+[node name="Language" type="OptionButton" parent="HUD/Menu/Margin/VBox/LanguageRow" unique_id=1837465029]
+unique_name_in_owner = true
+auto_translate_mode = 2
+layout_mode = 2
+size_flags_horizontal = 3
+
 [node name="Status" type="Label" parent="HUD/Menu/Margin/VBox" unique_id=803731277]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(300, 0)

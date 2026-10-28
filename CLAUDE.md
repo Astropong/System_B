@@ -7,6 +7,12 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 ## Conventions
 
 - Commentaires, textes du jeu et messages de commit **en français**.
+- **Multilangue** (`core/language.gd`, `i18n/translations.csv`, colonnes `fr` et
+  `en`) : les clés sont les textes français. Tout nouveau texte affiché doit avoir
+  sa ligne dans le CSV. `Label`/`Button` traduisent seuls leur `text` ; un texte
+  composé ou dessiné passe par `tr("…") % valeurs`, et les nœuds qui dessinent du
+  texte se redessinent sur `NOTIFICATION_TRANSLATION_CHANGED`. Après modification
+  du CSV : réimporter (`--import`) pour régénérer les `.translation`.
 - Indentation par **tabulations** dans les fichiers `.gd`.
 - Commentaires de documentation `##` en tête de chaque script et des fonctions publiques.
 - 1 case = **48 px** = diamètre du personnage (`Module.CELL_SIZE`). Les tailles se
@@ -17,8 +23,10 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 ## Lancer et tester
 
 - Scène principale : `main.tscn`. Menu **Héberger** / **Rejoindre** (adresse par
-  défaut `127.0.0.1`, port UDP 7777).
-- Arguments : `--host`, `--join`, `--join=<ip>`, `--release` (désactive le mode debug).
+  défaut `127.0.0.1`, port UDP 7777) / **Langue** (mémorisée dans
+  `user://settings.cfg`, sinon langue du système, sinon anglais).
+- Arguments : `--host`, `--join`, `--join=<ip>`, `--release` (désactive le mode debug),
+  `--lang=fr|en` (langue de la session, non mémorisée).
 - Serveur dédié : étiquette de fonctionnalité `dedicated_server`, de préférence avec
   `--headless`. Il crée la partie sans menu ni personnage.
 - Dans l'éditeur : menu Débogage → personnalisation des instances de lancement,
@@ -43,7 +51,7 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 Fichiers rangés **par fonctionnalité** (scène, script et shaders ensemble) :
 `core/` (réseau, mode debug), `ship/` (vaisseau, portes, `rules/`, `modules/`
 et leurs `shaders/`), `player/`, `world/` (fond étoilé, brouillard), `ui/`
-(interface), `assets/`
+(interface), `i18n/` (traductions), `assets/`
 pour les futures ressources. Racine : `main.tscn` et fichiers du projet.
 Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 (`preload`) et les `.tscn`.

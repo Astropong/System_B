@@ -29,6 +29,10 @@ interact={
 ]
 }
 
+[internationalization]
+
+locale/translations=PackedStringArray("res://i18n/translations.fr.translation", "res://i18n/translations.en.translation")
+
 [physics]
 
 3d/physics_engine="Jolt Physics"
