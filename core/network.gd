@@ -142,6 +142,7 @@ func _on_peer_connected(peer_id: int) -> void:
 	# et personnages (ceux-ci ne sont transmis qu'à chaque changement d'ordre).
 	_ship.send_motion_to(peer_id)
 	_ship.send_module_states(peer_id)
+	_ship.send_module_controls(peer_id)
 	_ship.send_door_states(peer_id)
 	for player in _crew.get_children():
 		if player is Player and player.name != str(peer_id):

@@ -85,6 +85,15 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   `machine_temperature` (°C, réels, affichés arrondis), `state` (0–1),
   `grid_position` (cases, réglée dans la scène). `doorways` et `neighbors` sont
   calculés par le vaisseau.
+- **Commandes** (affichées dans la fenêtre du module, voir Fenêtre de module) :
+  `@export` `can_be_switched_off` (levier marche / arrêt, vrai par défaut) et
+  `adjustable_power` (curseur d'alimentation cible, vrai par défaut, mis à faux
+  dans le `_init` du Couloir et du Générateur). Curseur entre `get_min_power()`
+  et `get_max_power()` (optimum × `max_power_ratio`, 1,5 par défaut). État
+  synchronisé : `is_on`, `target_power` (négatif = optimum).
+  - Le joueur demande à l'hôte (`request_switch`, `request_target_power`), qui
+    applique et renvoie à tous (`_receive_controls`). Éteint : `power_supplied`
+    passe à 0 aussitôt.
 - Dessin : sol quadrillé, aménagement du type (`_draw_details`, à l'échelle réelle),
   zone d'interaction, murs, nom traduit en haut à gauche, jauge (verte, rouge sous
   le minimum) et températures (debug seulement).
@@ -132,11 +141,12 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   seconde, et envoie tout en un RPC (`_receive_power_and_temperatures`, non fiable ordonné).
 
 ### Alimentation — `ship/rules/power_rules.gd`
-- Le Générateur est toujours à l'optimum.
+- Un module éteint est à 0 W. Le Générateur allumé est toujours à l'optimum.
 - Optimum : 100 W pour tous les modules, 10 W pour les couloirs.
-- Tout autre module gagne `CHARGE_SPEED` W/s, plafonné à son optimum (jamais au-delà),
-  si un voisin (`Module.neighbors`, relié par une porte) a atteint sa propre
-  alimentation minimale. Sinon il garde sa charge.
+- Tout autre module gagne `CHARGE_SPEED` W/s, plafonné à `Module.get_power_cap()`
+  (cible du curseur, sinon optimum), si un voisin (`Module.neighbors`, relié par
+  une porte) a atteint sa propre alimentation minimale. Sinon il garde sa charge.
+  Au-dessus du plafond (cible baissée), il y redescend aussitôt.
 
 ### Température — `ship/rules/temperature_rules.gd`
 - Machine : cible = puissance / `MACHINE_WATTS_PER_DEGREE`.
@@ -144,8 +154,8 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - Chacune rejoint sa cible à une vitesse (°C/s) lente sous un petit écart, rapide
   au-delà d'un grand écart, linéaire entre les deux (`_approach`, constantes
   `MACHINE_*` / `ROOM_*`). Mise à jour au même pas que l'alimentation.
-- N'a pour l'instant qu'un effet visuel. Avec un optimum de 100 W, la machine
-  plafonne à 50 °C et la pièce à 30 °C : ni chaleur (`HEAT_THRESHOLD`) ni givre
+- N'a pour l'instant qu'un effet visuel. À 150 W (cible maximale), la machine
+  plafonne à 75 °C et la pièce à 35 °C : ni chaleur (`HEAT_THRESHOLD`) ni givre
   (`FROST_THRESHOLD`) ne se déclenchent actuellement.
 
 ### Portes — `ship/door.gd`
@@ -166,7 +176,8 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
     celui de l'écran ; la vitesse renvoyée est tournée de l'orientation du
     vaisseau (`_get_ship_rotation`), car `move_and_slide` agit dans le repère du monde.
 - **Joueur qui arrive** : `Network._on_peer_connected` lui envoie l'état du vaisseau,
-  l'état des modules, les portes et les personnages. Toute nouvelle donnée
+  l'état des modules, leurs commandes (`Ship.send_module_controls`), les portes et
+  les personnages. Toute nouvelle donnée
   synchronisée doit y être ajoutée.
 - **État des modules** (`Module.state`) : décidé par l'hôte, envoyé en fiable par
   `Ship.send_module_states` (à tous, ou à un joueur qui arrive) → RPC
@@ -185,12 +196,19 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - Action `interact` (Espace, clic droit ; `project.godot`) dans la zone
   d'interaction d'un module (`Module.get_interaction_rect`, 2 × 2 cases au centre) :
   ouvre la fenêtre ; même action pour la fermer. Indication en bas d'écran.
+- Gauche : levier marche / arrêt (manche en haut = allumé) puis curseur vertical
+  de l'alimentation cible, chacun affiché selon les booléens du module ; colonne
+  masquée si aucun. Curseur : rail noir, manette carrée (texture générée,
+  `_make_grabber_texture`), repère « 100% » à droite à la hauteur de l'optimum
+  (placement manuel, `_layout_slider`), cliquable pour y ramener la cible.
+  Pendant un glissement, la cible part toutes les
+  `SLIDER_SEND_INTERVAL` s, puis au relâchement.
 - Centre : `Module.build_interface` (bouton d'exemple par défaut) ; pour des
   éléments propres à un type, la redéfinir dans son `module_*.gd`. Côté : état (« Intact » si `state` > `BROKEN_THRESHOLD`, sinon « Cassé »),
   consommation, températures de la machine et de la pièce.
 - `ModuleWindow.is_open` immobilise le personnage local. Les boutons de la
   fenêtre ne prennent pas le focus (Espace sert à fermer).
-- Locale à chaque joueur : rien n'est synchronisé.
+- Locale à chaque joueur : seules les commandes passent par l'hôte.
 
 ### Mode debug — `core/debug_mode.gd`
 - Actif dans l'éditeur et les exports « avec débogage », sauf avec `--release`.
@@ -205,8 +223,8 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - Pas de calcul d'itinéraire : un clic hors de l'axe d'une porte fait buter contre le mur.
 - Pannes des modules à définir (`get_possible_failures`) ; `state` seulement affiché
   (valeurs aléatoires de test).
-- Surchauffe et surtension à venir : le code d'éclairage orangé (au-delà de
-  l'optimum) reste en place, bien que la recharge soit plafonnée à l'optimum.
+- Surchauffe et surtension à venir : le curseur permet de dépasser l'optimum
+  (éclairage orangé), sans autre conséquence pour l'instant.
 - Le mobilier est seulement dessiné : il ne bloque pas les déplacements.
 - Effets de chaleur et de givre inaccessibles avec les puissances actuelles (voir
   Température) : seuils ou règles à revoir avec la surchauffe.

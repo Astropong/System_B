@@ -6,6 +6,11 @@ extends Module
 const ACCENT := Color(1.0, 0.85, 0.25)
 
 
+func _init() -> void:
+	# Toujours à l'optimum (voir PowerRules) : pas de curseur d'alimentation.
+	adjustable_power = false
+
+
 func get_type_id() -> Module.ModuleType:
 	return Module.ModuleType.GENERATEUR
 

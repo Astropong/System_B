@@ -131,6 +131,27 @@ const QUADRANT_SIZE := 3.0
 	set(value):
 		state = clampf(value, 0.0, 1.0)
 
+## Vrai si le module peut être éteint (levier marche / arrêt de la fenêtre
+## du module, voir ModuleWindow).
+@export var can_be_switched_off: bool = true
+
+## Vrai si l'alimentation cible du module se règle (curseur de la fenêtre du
+## module), entre get_min_power() et get_max_power(). Faux pour le Couloir et
+## le Générateur.
+@export var adjustable_power: bool = true
+
+## Alimentation cible maximale, en proportion de l'alimentation optimale.
+@export_range(1.0, 3.0, 0.05) var max_power_ratio: float = 1.5
+
+## Module allumé. Éteint, il ne consomme rien (power_supplied à 0).
+## Décidé par l'hôte (voir request_switch).
+var is_on: bool = true
+
+## Alimentation cible (W) : la recharge s'arrête à cette valeur si
+## [member adjustable_power], sinon à l'optimum. Décidée par l'hôte (voir
+## request_target_power) ; négative tant qu'elle n'est pas réglée (optimum).
+var target_power: float = -1.0
+
 var _lamps: Node2D
 var _light_color: Color = Color.WHITE
 var _flicker_time_left: float = 0.0
@@ -172,6 +193,19 @@ var neighbors: Array[Module] = []
 ## l'alimentation optimale. Une classe fille peut la redéfinir.
 func get_min_power() -> float:
 	return get_ideal_power() * 0.5
+
+
+## Alimentation cible maximale (W) : optimum × [member max_power_ratio].
+func get_max_power() -> float:
+	return get_ideal_power() * max_power_ratio
+
+
+## Alimentation à laquelle la recharge s'arrête (W) : la cible réglée si
+## [member adjustable_power], sinon l'optimum.
+func get_power_cap() -> float:
+	if not adjustable_power or target_power < 0.0:
+		return get_ideal_power()
+	return target_power
 
 
 ## Taille en cases (1 case = taille du personnage) : DEFAULT_SIZE par défaut.
@@ -249,6 +283,53 @@ func _process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
 	_update_lighting(delta)
+
+
+# --- Commandes : levier marche / arrêt et curseur d'alimentation -------------
+
+## Demande à l'hôte d'allumer ou d'éteindre le module (joueur local).
+func request_switch(on: bool) -> void:
+	_request_switch.rpc_id(1, on)
+
+
+## Demande à l'hôte de régler l'alimentation cible à [param watts] (joueur local).
+func request_target_power(watts: float) -> void:
+	_request_target_power.rpc_id(1, watts)
+
+
+## Envoie l'état des commandes (marche, cible) à un joueur qui arrive (hôte).
+func send_controls_to(peer_id: int) -> void:
+	_receive_controls.rpc_id(peer_id, is_on, target_power)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _request_switch(on: bool) -> void:
+	if not multiplayer.is_server() or not can_be_switched_off:
+		return
+	_apply_controls(on, target_power)
+	_receive_controls.rpc(is_on, target_power)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _request_target_power(watts: float) -> void:
+	if not multiplayer.is_server() or not adjustable_power:
+		return
+	_apply_controls(is_on, watts)
+	_receive_controls.rpc(is_on, target_power)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_controls(on: bool, watts: float) -> void:
+	_apply_controls(on, watts)
+
+
+## Éteint, le module ne consomme plus rien, immédiatement.
+func _apply_controls(on: bool, watts: float) -> void:
+	is_on = on
+	if watts >= 0.0:
+		target_power = clampf(watts, get_min_power(), get_max_power())
+	if not is_on:
+		power_supplied = 0.0
 
 
 ## Rapport puissance fournie / puissance idéale (1 = alimentation parfaite).

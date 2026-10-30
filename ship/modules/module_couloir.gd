@@ -13,6 +13,11 @@ const ACCENT := Color(0.9, 0.75, 0.2, 0.45)
 		_request_arrangement()
 
 
+func _init() -> void:
+	# Consommation fixe : pas de curseur d'alimentation.
+	adjustable_power = false
+
+
 func get_type_id() -> Module.ModuleType:
 	return Module.ModuleType.COULOIR
 

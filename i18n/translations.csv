@@ -32,3 +32,6 @@ keys,fr,en
 "Consommation","Consommation","Power consumption"
 "Température de la machine","Température de la machine","Machine temperature"
 "Température de la pièce","Température de la pièce","Room temperature"
+"Marche","Marche","On"
+"Arrêt","Arrêt","Off"
+"Alimentation cible","Alimentation cible","Target power"

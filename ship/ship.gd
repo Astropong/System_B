@@ -200,6 +200,14 @@ func _receive_module_states(states: PackedFloat32Array) -> void:
 		modules[i].state = states[i]
 
 
+## Envoie l'état des commandes de tous les modules (marche / arrêt,
+## alimentation cible) à un joueur qui vient d'arriver (hôte). Les
+## changements ultérieurs sont envoyés par chaque module.
+func send_module_controls(peer_id: int) -> void:
+	for m in get_modules():
+		m.send_controls_to(peer_id)
+
+
 func get_modules() -> Array[Module]:
 	var result: Array[Module] = []
 	for child in get_children():

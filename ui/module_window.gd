@@ -4,6 +4,9 @@ extends Control
 ## d'interaction du module (Module.get_interaction_rect) avec l'action
 ## « interact » (Espace ou clic droit), refermée par la même action.
 ##
+## À gauche : levier marche / arrêt et curseur de l'alimentation cible
+## (selon Module.can_be_switched_off et Module.adjustable_power), décidés par
+## l'hôte (Module.request_switch, Module.request_target_power).
 ## Au centre : les éléments propres au module (Module.build_interface).
 ## Sur le côté : ses statistiques (état, consommation, températures), mises à
 ## jour en continu. Tant que la fenêtre est ouverte, le personnage ne se
@@ -23,6 +26,28 @@ const PROMPT_TEXT := "Espace / clic droit : utiliser %s"
 const PANEL_COLOR := Color(0.09, 0.1, 0.13, 0.96)
 const PANEL_BORDER_COLOR := Color(0.55, 0.58, 0.65)
 
+## Commandes, à gauche du centre : levier marche / arrêt (si
+## Module.can_be_switched_off), curseur d'alimentation cible en dessous (si
+## Module.adjustable_power).
+const CONTROLS_WIDTH := 110.0
+const LEVER_SIZE := Vector2(56, 96)
+const LEVER_ON_COLOR := Color(0.3, 0.9, 0.4)
+const LEVER_OFF_COLOR := Color(0.95, 0.25, 0.2)
+const LEVER_PLATE_COLOR := Color(0.23, 0.25, 0.3)
+const LEVER_SLOT_COLOR := Color(0.05, 0.05, 0.07)
+## Intervalle minimal (s) entre deux cibles envoyées pendant un glissement.
+const SLIDER_SEND_INTERVAL := 0.1
+## Curseur : largeur du rail (noir), manette carrée, repère « 100% » à droite
+## (trait de SLIDER_MARK_LENGTH px ; un clic sur le texte règle l'optimum).
+const SLIDER_TRACK_WIDTH := 8
+const SLIDER_TRACK_COLOR := Color.BLACK
+const SLIDER_GRABBER_SIZE := 20
+const SLIDER_GRABBER_COLOR := Color(0.85, 0.88, 0.95)
+const SLIDER_GRABBER_HIGHLIGHT := Color.WHITE
+const SLIDER_GRABBER_BORDER := Color(0.3, 0.32, 0.38)
+const SLIDER_MARK_LENGTH := 12.0
+const SLIDER_MARK_FONT_SIZE := 14
+
 @export var ship: Ship
 
 var _module: Module
@@ -34,6 +59,17 @@ var _power_label: Label
 var _machine_label: Label
 var _room_label: Label
 var _prompt: Label
+var _controls: VBoxContainer
+var _controls_separator: VSeparator
+var _lever: Control
+var _lever_label: Label
+var _slider: VSlider
+var _slider_box: VBoxContainer
+var _slider_label: Label
+var _slider_area: Control
+var _optimal_button: Button
+var _slider_dragging: bool = false
+var _time_since_send: float = 0.0
 
 
 func _ready() -> void:
@@ -57,9 +93,10 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _module != null:
 		_update_stats()
+		_update_controls(delta)
 		return
 	var module := _get_module_in_reach()
 	_prompt.visible = module != null
@@ -76,7 +113,17 @@ func open(module: Module) -> void:
 		_content.remove_child(child)
 		child.queue_free()
 	module.build_interface(_content)
+	_lever.visible = module.can_be_switched_off
+	_lever_label.visible = module.can_be_switched_off
+	_slider_box.visible = module.adjustable_power
+	_controls.visible = module.can_be_switched_off or module.adjustable_power
+	_controls_separator.visible = _controls.visible
+	_slider_dragging = false
+	_slider.min_value = module.get_min_power()
+	_slider.max_value = module.get_max_power()
+	_layout_slider()
 	_update_stats()
+	_update_controls(0.0)
 	_prompt.hide()
 	_panel.show()
 
@@ -110,6 +157,103 @@ func _update_stats() -> void:
 	_room_label.text = "%d °C" % roundi(_module.room_temperature)
 
 
+## Levier et curseur suivent l'état décidé par l'hôte, sauf le curseur tant
+## qu'il est tenu : sa valeur part alors au plus toutes les
+## SLIDER_SEND_INTERVAL s, et une dernière fois au relâchement.
+func _update_controls(delta: float) -> void:
+	_lever.queue_redraw()
+	_lever_label.text = tr("Marche") if _module.is_on else tr("Arrêt")
+	if _slider_dragging:
+		_time_since_send += delta
+		if _time_since_send >= SLIDER_SEND_INTERVAL and not is_equal_approx(_slider.value, _module.target_power):
+			_time_since_send = 0.0
+			_module.request_target_power(_slider.value)
+	else:
+		_slider.set_value_no_signal(_module.get_power_cap())
+	_slider_label.text = "%d W" % roundi(_slider.value)
+
+
+func _on_lever_input(event: InputEvent) -> void:
+	var button := event as InputEventMouseButton
+	if button != null and button.pressed and button.button_index == MOUSE_BUTTON_LEFT:
+		_module.request_switch(not _module.is_on)
+		_lever.accept_event()
+
+
+func _on_slider_drag_ended(_value_changed: bool) -> void:
+	_slider_dragging = false
+	if _module != null:
+		_module.request_target_power(_slider.value)
+
+
+## Clic sur « 100% » : manette à l'alimentation optimale.
+func _on_optimal_pressed() -> void:
+	if _module == null:
+		return
+	_slider.set_value_no_signal(_module.get_ideal_power())
+	_module.request_target_power(_module.get_ideal_power())
+
+
+## Place le curseur dans sa zone, et le texte « 100% » à droite, à la hauteur
+## de l'alimentation optimale.
+func _layout_slider() -> void:
+	var area := _slider_area.size
+	var width := float(SLIDER_GRABBER_SIZE)
+	_slider.position = Vector2(roundf(area.x * 0.35 - width / 2.0), 0.0)
+	_slider.size = Vector2(width, area.y)
+	var y := _get_optimal_y()
+	_optimal_button.reset_size()
+	_optimal_button.position = Vector2(_slider.position.x + width + SLIDER_MARK_LENGTH + 2.0,
+			roundf(y - _optimal_button.size.y / 2.0))
+	_slider_area.queue_redraw()
+
+
+## Ordonnée (px, dans la zone du curseur) du centre de la manette à
+## l'alimentation optimale ; même calcul que le dessin de VSlider.
+func _get_optimal_y() -> float:
+	if _module == null or _slider.max_value <= _slider.min_value:
+		return 0.0
+	var ratio := inverse_lerp(_slider.min_value, _slider.max_value, _module.get_ideal_power())
+	var height := _slider.size.y
+	var grabber := float(SLIDER_GRABBER_SIZE)
+	return height - ratio * (height - grabber) - grabber / 2.0
+
+
+## Trait du repère « 100% », à droite du rail.
+func _draw_optimal_mark() -> void:
+	if _module == null:
+		return
+	var x := _slider.position.x + _slider.size.x / 2.0 + SLIDER_TRACK_WIDTH / 2.0 + 2.0
+	var y := _get_optimal_y()
+	_slider_area.draw_line(Vector2(x, y), Vector2(_slider.position.x + _slider.size.x + SLIDER_MARK_LENGTH, y),
+			PANEL_BORDER_COLOR, 2.0)
+
+
+## Manette carrée du curseur (texture), cerclée de SLIDER_GRABBER_BORDER.
+static func _make_grabber_texture(color: Color) -> ImageTexture:
+	var image := Image.create_empty(SLIDER_GRABBER_SIZE, SLIDER_GRABBER_SIZE, false, Image.FORMAT_RGBA8)
+	image.fill(SLIDER_GRABBER_BORDER)
+	image.fill_rect(Rect2i(2, 2, SLIDER_GRABBER_SIZE - 4, SLIDER_GRABBER_SIZE - 4), color)
+	return ImageTexture.create_from_image(image)
+
+
+## Manche vers le haut si le module est allumé, vers le bas s'il est éteint.
+func _draw_lever() -> void:
+	if _module == null:
+		return
+	var rect := Rect2(Vector2.ZERO, _lever.size)
+	var center := rect.get_center()
+	var color := LEVER_ON_COLOR if _module.is_on else LEVER_OFF_COLOR
+	_lever.draw_rect(rect, LEVER_PLATE_COLOR)
+	_lever.draw_rect(rect, PANEL_BORDER_COLOR, false, 2.0)
+	var travel := rect.size.y * 0.32
+	_lever.draw_line(center + Vector2(0, -travel), center + Vector2(0, travel), LEVER_SLOT_COLOR, 8.0)
+	var knob := center + Vector2(0, -travel if _module.is_on else travel)
+	_lever.draw_line(center, knob, PANEL_BORDER_COLOR, 5.0)
+	_lever.draw_circle(knob, 11.0, color)
+	_lever.draw_arc(knob, 11.0, 0.0, TAU, 32, color.darkened(0.4), 2.0)
+
+
 func _build() -> void:
 	_panel = PanelContainer.new()
 	_panel.custom_minimum_size = WINDOW_SIZE
@@ -132,6 +276,73 @@ func _build() -> void:
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 20)
 	margin.add_child(columns)
+
+	# Gauche : levier marche / arrêt, puis curseur de l'alimentation cible.
+	_controls = VBoxContainer.new()
+	_controls.custom_minimum_size.x = CONTROLS_WIDTH
+	_controls.add_theme_constant_override("separation", 6)
+	columns.add_child(_controls)
+	_lever = Control.new()
+	_lever.custom_minimum_size = LEVER_SIZE
+	_lever.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_lever.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_lever.draw.connect(_draw_lever)
+	_lever.gui_input.connect(_on_lever_input)
+	_controls.add_child(_lever)
+	_lever_label = Label.new()
+	_lever_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_controls.add_child(_lever_label)
+	_slider_box = VBoxContainer.new()
+	_slider_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_controls.add_child(_slider_box)
+	_slider_box.add_child(HSeparator.new())
+	var slider_caption := Label.new()
+	slider_caption.text = "Alimentation cible"
+	slider_caption.modulate = Color(1, 1, 1, 0.6)
+	slider_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	slider_caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_slider_box.add_child(slider_caption)
+	# Zone du curseur : placement manuel (voir _layout_slider), pour aligner
+	# le repère « 100% » sur la manette.
+	_slider_area = Control.new()
+	_slider_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_slider_area.resized.connect(_layout_slider)
+	_slider_area.draw.connect(_draw_optimal_mark)
+	_slider_box.add_child(_slider_area)
+	_slider = VSlider.new()
+	_slider.step = 1.0
+	_slider.focus_mode = Control.FOCUS_NONE
+	# Rail noir sur toute la course, manette carrée.
+	var track := StyleBoxFlat.new()
+	track.bg_color = SLIDER_TRACK_COLOR
+	track.content_margin_left = SLIDER_TRACK_WIDTH / 2.0
+	track.content_margin_right = SLIDER_TRACK_WIDTH / 2.0
+	for style_name in ["slider", "grabber_area", "grabber_area_highlight"]:
+		_slider.add_theme_stylebox_override(style_name, track)
+	_slider.add_theme_icon_override("grabber", _make_grabber_texture(SLIDER_GRABBER_COLOR))
+	_slider.add_theme_icon_override("grabber_highlight", _make_grabber_texture(SLIDER_GRABBER_HIGHLIGHT))
+	_slider.drag_started.connect(func() -> void:
+		_slider_dragging = true
+		_time_since_send = SLIDER_SEND_INTERVAL)
+	_slider.drag_ended.connect(_on_slider_drag_ended)
+	_slider_area.add_child(_slider)
+	_optimal_button = Button.new()
+	_optimal_button.text = "100%"
+	_optimal_button.flat = true
+	_optimal_button.focus_mode = Control.FOCUS_NONE
+	_optimal_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_optimal_button.add_theme_font_size_override("font_size", SLIDER_MARK_FONT_SIZE)
+	_optimal_button.add_theme_constant_override("h_separation", 0)
+	for style_name in ["normal", "hover", "pressed", "focus"]:
+		_optimal_button.add_theme_stylebox_override(style_name, StyleBoxEmpty.new())
+	_optimal_button.pressed.connect(_on_optimal_pressed)
+	_slider_area.add_child(_optimal_button)
+	_slider_label = Label.new()
+	_slider_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_slider_label.add_theme_font_size_override("font_size", STAT_FONT_SIZE)
+	_slider_box.add_child(_slider_label)
+	_controls_separator = VSeparator.new()
+	columns.add_child(_controls_separator)
 
 	# Centre : titre et éléments propres au module.
 	var main := VBoxContainer.new()
