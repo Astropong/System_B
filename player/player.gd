@@ -1,7 +1,7 @@
 class_name Player
 extends CharacterBody2D
 ## Personnage vu de dessus, dessiné comme un rond.
-## - Flèches du clavier : déplacement direct.
+## - Flèches, ZQSD ou WASD (actions move_*, project.godot) : déplacement direct.
 ## - Bouton gauche maintenu : le personnage se rend vers la souris ; il
 ##   s'arrête dès que le bouton est relâché.
 ## Il est placé dans le vaisseau (nœud Ship/Crew) : il avance et tourne avec
@@ -93,8 +93,8 @@ func _physics_process(delta: float) -> void:
 
 
 func _read_input() -> void:
-	# Fenêtre de module ouverte : le personnage reste immobile.
-	if ModuleWindow.is_open:
+	# Fenêtre de module ouverte ou mode pilotage : le personnage reste immobile.
+	if ModuleWindow.is_open or Piloting.is_active():
 		input_dir = Vector2.ZERO
 		has_target = false
 		return
@@ -107,8 +107,8 @@ func _read_input() -> void:
 	else:
 		has_target = false
 
-	# Clavier : les actions ui_* sont déjà associées aux flèches.
-	input_dir = Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
+	# Clavier : flèches, ZQSD et WASD (touches selon leur lettre, pas leur place).
+	input_dir = Input.get_vector("move_left", "move_right", "move_up", "move_down")
 	if input_dir != Vector2.ZERO:
 		has_target = false  # le clavier annule la cible de la souris
 

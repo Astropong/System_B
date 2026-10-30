@@ -30,7 +30,7 @@ const CORRECTION_SNAP_ANGLE := 10.0
 ## Longueur minimale (cases) d'un mur partagé pour y placer une porte.
 const MIN_SHARED_WALL := 4
 
-## Vitesse d'avancée du vaisseau vers la droite de l'écran, en pixels par
+## Vitesse d'avancée du vaisseau vers son avant (sa droite), en pixels par
 ## seconde (1 case = 48 px). Peut varier en cours de partie : à modifier sur
 ## l'hôte, qui transmet le changement aux autres joueurs.
 @export var speed: float = 10.0:
@@ -49,7 +49,14 @@ const MIN_SHARED_WALL := 4
 		angular_speed = value
 		_send_motion_change()
 
+## Vitesses maximales que le joueur aux commandes peut demander (px/s, °/s),
+## voir Piloting et request_motion.
+@export var max_speed: float = 400.0
+@export var max_angular_speed: float = 30.0
+
 var _arranging: bool = false
+# Vrai pendant set_motion : les deux vitesses partent en un seul envoi.
+var _setting_motion: bool = false
 var _rules_timer: float = 0.0
 var _motion_timer: float = 0.0
 var _position_error := Vector2.ZERO
@@ -64,7 +71,7 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
-	position.x += speed * delta
+	position += Vector2.RIGHT.rotated(rotation) * speed * delta
 	# Angle non replié dans [-180°, 180°] : le saut de 360° serait interpolé.
 	rotation += deg_to_rad(angular_speed) * delta
 	if is_multiplayer_authority():
@@ -82,7 +89,45 @@ func send_motion_to(peer_id: int) -> void:
 	_receive_motion.rpc_id(peer_id, position, rotation, speed, angular_speed)
 
 
+## Change les deux vitesses à la fois, en un seul envoi aux autres (hôte).
+func set_motion(new_speed: float, new_angular_speed: float) -> void:
+	_setting_motion = true
+	var changed := new_speed != speed or new_angular_speed != angular_speed
+	speed = new_speed
+	angular_speed = new_angular_speed
+	_setting_motion = false
+	if changed:
+		_send_motion_change()
+
+
+## Demande à l'hôte de changer les vitesses (joueur aux commandes, voir
+## Piloting) ; l'hôte les borne à max_speed et max_angular_speed, et ignore
+## la demande si le pilotage n'est pas alimenté (is_helm_powered).
+func request_motion(new_speed: float, new_angular_speed: float) -> void:
+	_request_motion.rpc_id(1, new_speed, new_angular_speed)
+
+
+## Vrai si un module de pilotage a au moins son alimentation minimale : sans
+## cela, les commandes de pilotage sont sans effet (le vaisseau garde son
+## mouvement).
+func is_helm_powered() -> bool:
+	for m in get_modules():
+		if m is ModulePilotage and m.power_supplied >= m.get_min_power():
+			return true
+	return false
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _request_motion(new_speed: float, new_angular_speed: float) -> void:
+	if not multiplayer.is_server() or not is_helm_powered():
+		return
+	set_motion(clampf(new_speed, 0.0, max_speed),
+			clampf(new_angular_speed, -max_angular_speed, max_angular_speed))
+
+
 func _send_motion_change() -> void:
+	if _setting_motion:
+		return
 	if is_inside_tree() and not Engine.is_editor_hint() and is_multiplayer_authority():
 		_receive_motion.rpc(position, rotation, speed, angular_speed)
 

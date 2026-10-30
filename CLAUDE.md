@@ -25,6 +25,10 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 - Scène principale : `main.tscn`. Menu **Héberger** / **Rejoindre** (adresse par
   défaut `127.0.0.1`, port UDP 7777) / **Langue** (mémorisée dans
   `user://settings.cfg`, sinon langue du système, sinon anglais).
+- **F11** (action `toggle_fullscreen`, autoload `Fullscreen`, `core/fullscreen.gd`) :
+  plein écran / fenêtre. Fenêtre de base 1152 × 648 (valeur par défaut de Godot),
+  étirée (`canvas_items`, `expand`) : un écran d'un autre format que 16:9 montre
+  un peu plus de monde, sans importance.
 - Arguments : `--host`, `--join`, `--join=<ip>`, `--release` (désactive le mode debug),
   `--lang=fr|en` (langue de la session, non mémorisée).
 - Serveur dédié : étiquette de fonctionnalité `dedicated_server`, de préférence avec
@@ -63,12 +67,17 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 ## Architecture
 
 Fichiers rangés **par fonctionnalité** (scène, script et shaders ensemble) :
-- `core/` : réseau, langue, mode debug ;
-- `ship/` : vaisseau, portes, `rules/` (alimentation, température), `modules/`
-  et leurs `shaders/` ;
+- `core/` : réseau, langue, mode debug, plein écran ;
+- `ship/` : vaisseau, portes, mode pilotage, `rules/` (alimentation,
+  température), `modules/` (avec le volant du Pilotage) et leurs `shaders/` ;
 - `player/` ; `world/` (fond étoilé, brouillard) ; `ui/` (interface) ;
   `i18n/` (traductions) ; `assets/` pour les futures ressources.
 - Racine : `main.tscn` et fichiers du projet.
+
+**Éditeur ouvert pendant des modifications de scripts** : il a déjà réenregistré
+`main.tscn` avec des propriétés de modules faussées (`grid_position =
+Color(...)`, `null`), empilant les salles. Vérifier `git diff main.tscn` avant
+de commiter.
 
 Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 (`preload`) et les `.tscn`.
@@ -122,9 +131,11 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   avec une porte au milieu de la partie commune (verticale ou pivotée de 90°).
 - Le nœud `Structure` (généré, non sauvegardé) contient les collisions des murs, les
   `LightOccluder2D` (murs fusionnés par droite : `_merge_wall_lines`) et les `Door`.
-- Avance à `speed` (vers la droite de l'écran) et tourne à `angular_speed` (°/s),
-  **simulé par chaque joueur**. Changer l'une des vitesses sur l'hôte envoie
-  position, orientation et vitesses aux autres (`_receive_motion`) ; l'hôte
+- Avance à `speed` (px/s, vers son avant, c'est-à-dire sa droite) et tourne à
+  `angular_speed` (°/s), **simulé par chaque joueur**. Changer l'une des vitesses
+  sur l'hôte (ou les deux, `set_motion`) envoie position, orientation et vitesses
+  aux autres (`_receive_motion`) ; un joueur les demande par `request_motion`,
+  bornées à `max_speed` / `max_angular_speed` par l'hôte. L'hôte
   corrige aussi position et orientation toutes les `MOTION_SYNC_INTERVAL` s
   (`_receive_position`), écart résorbé en douceur, ou d'un coup au-delà de
   `CORRECTION_SNAP_DISTANCE` / `CORRECTION_SNAP_ANGLE`.
@@ -158,6 +169,25 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   plafonne à 75 °C et la pièce à 35 °C : ni chaleur (`HEAT_THRESHOLD`) ni givre
   (`FROST_THRESHOLD`) ne se déclenchent actuellement.
 
+### Mode pilotage — `ship/piloting.gd`, `ship/modules/steering_wheel.gd`
+- Fenêtre du Pilotage (`ModulePilotage.build_interface`) : volant cliquable
+  (`SteeringWheel`, couleur `HOVER_COLOR` et agrandissement `HOVER_SCALE` au
+  survol, appliqué dans le dessin car un conteneur remet `scale` à 1) →
+  `Piloting.enter()` (nœud `HUD/Piloting`, local à chaque joueur).
+- En `TRANSITION_TIME` s, la caméra du joueur (restée enfant du personnage) se
+  décale sur un point `LOOK_AHEAD` cases devant le centre du vaisseau, annule sa
+  rotation et dézoome de `ZOOM_FACTOR` (`_apply_camera`, tours entiers retirés
+  avec `_turns`).
+- Clavier (`move_*`) ou bouton gauche maintenu : direction voulue ; le vaisseau
+  y tourne (`STEER_GAIN`) et avance selon l'alignement, s'arrête sans commande.
+  Vitesses demandées à l'hôte au plus toutes les `SEND_INTERVAL` s. Clic droit :
+  sortie. `Piloting.is_active()` (transitions comprises) immobilise le personnage
+  et bloque la fenêtre de module.
+- Sans module de pilotage à son alimentation minimale (`Ship.is_helm_powered`),
+  aucune commande : le pilote n'envoie rien (avertissement `UNPOWERED_TEXT`),
+  l'hôte refuse les demandes, le vaisseau garde son mouvement. Le mode
+  reste accessible.
+
 ### Portes — `ship/door.gd`
 - S'ouvrent quand un `CharacterBody2D` entre dans leur zone, se referment
   `open_duration` s après son départ. Décidées par l'hôte, appliquées par RPC.
@@ -167,6 +197,9 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   l'alimentation ; chaque joueur fait autorité sur son personnage.
 - Personnages créés par `PlayerSpawner` (fonction de spawn personnalisée) ; nom du
   nœud = id réseau.
+- Commandes : actions `move_left/right/up/down` (`project.godot`) = flèches, ZQSD
+  et WASD, liées à la lettre de la touche (`keycode`), pas à sa place ; bouton
+  gauche maintenu : aller vers la souris, arrêt au relâchement.
 - **Pas de `MultiplayerSynchronizer`** : un joueur envoie ses **ordres** (direction
   clavier, cible souris) quand ils changent, avec sa position de départ ; chaque
   machine simule le déplacement. Position finale à l'arrêt, correction toutes les
@@ -191,6 +224,11 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - `CanvasModulate` à 0.25 ; l'énergie de `VisionLight` (`player/player.tscn`) doit valoir
   1 − cette valeur pour un éclairage normal dans la zone visible.
 - Le fond étoilé (`world/starfield.gd`) est sur un `CanvasLayer` à part pour rester visible.
+  Le calque ne suit pas la vue tel quel (`follow_viewport_enabled` coupé au
+  lancement) : avant chaque rendu (`frame_pre_draw`, `_follow_view`), il reprend
+  position et rotation de la vue, pas son zoom. Étoiles de taille et densité
+  constantes, nombre de tuiles constant (en suivant le zoom, le dézoom ×20
+  redessinait des milliers de tuiles : ≈ 0,7 s par image).
 
 ### Fenêtre de module — `ui/module_window.gd`
 - Action `interact` (Espace, clic droit ; `project.godot`) dans la zone
@@ -226,6 +264,10 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - Surchauffe et surtension à venir : le curseur permet de dépasser l'optimum
   (éclairage orangé), sans autre conséquence pour l'instant.
 - Le mobilier est seulement dessiné : il ne bloque pas les déplacements.
+- Pilotage : plusieurs joueurs peuvent piloter à la fois (dernière demande
+  gagnante) ; un pilote qui se déconnecte laisse le vaisseau à sa dernière
+  vitesse. En vue dézoomée, le brouillard de guerre assombrit presque tout le
+  vaisseau.
 - Effets de chaleur et de givre inaccessibles avec les puissances actuelles (voir
   Température) : seuils ou règles à revoir avec la surchauffe.
 - Un message de connexion déjà affiché ne change pas de langue avant le suivant.

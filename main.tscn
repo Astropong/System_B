@@ -17,6 +17,7 @@
 [ext_resource type="Script" path="res://ship/modules/module_tourelles.gd" id="15_tourelles"]
 [ext_resource type="Script" path="res://ship/modules/module_radar.gd" id="16_radar"]
 [ext_resource type="Script" path="res://ui/module_window.gd" id="17_module_window"]
+[ext_resource type="Script" uid="uid://bqq5y7jbw5x7n" path="res://ship/piloting.gd" id="18_piloting"]
 
 [node name="Main" type="Node2D" unique_id=1339899747]
 
@@ -102,7 +103,7 @@ script = ExtResource("8_fog")
 [node name="Instructions" type="Label" parent="HUD" unique_id=1314621133]
 offset_left = 16.0
 offset_top = 12.0
-text = "Flèches : se déplacer   |   Clic gauche maintenu : aller vers la souris   |   Les portes s'ouvrent à l'approche"
+text = "Flèches, ZQSD ou WASD : se déplacer   |   Clic gauche maintenu : aller vers la souris   |   Les portes s'ouvrent à l'approche   |   F11 : plein écran"
 
 [node name="ModuleWindow" type="Control" parent="HUD" node_paths=PackedStringArray("ship") unique_id=1765340921]
 layout_mode = 3
@@ -113,6 +114,17 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("17_module_window")
+ship = NodePath("../../Ship")
+
+[node name="Piloting" type="Control" parent="HUD" node_paths=PackedStringArray("ship") unique_id=1583920476]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("18_piloting")
 ship = NodePath("../../Ship")
 
 [node name="Menu" type="PanelContainer" parent="HUD" unique_id=90238282]

@@ -81,7 +81,7 @@ func _ready() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if not event.is_action_pressed("interact") or event.is_echo():
+	if not event.is_action_pressed("interact") or event.is_echo() or Piloting.is_active():
 		return
 	if _module != null:
 		close()
@@ -94,6 +94,12 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	# Mode pilotage (lancé depuis le volant) : fenêtre fermée, pas d'indication.
+	if Piloting.is_active():
+		if _module != null:
+			close()
+		_prompt.hide()
+		return
 	if _module != null:
 		_update_stats()
 		_update_controls(delta)

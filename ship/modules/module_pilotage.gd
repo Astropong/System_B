@@ -1,9 +1,21 @@
 @tool
 class_name ModulePilotage
 extends Module
-## Pilotage : poste de commande du vaisseau.
+## Pilotage : poste de commande du vaisseau. Sa fenêtre porte un volant qui
+## fait passer le joueur en mode pilotage (voir Piloting).
 
 const ACCENT := Color(0.45, 0.65, 1.0)
+
+
+## Fenêtre du module : volant cliquable (prendre les commandes).
+func build_interface(container: Container) -> void:
+	var wheel := SteeringWheel.new()
+	wheel.pressed.connect(Piloting.enter)
+	container.add_child(wheel)
+	var caption := Label.new()
+	caption.text = "Prendre les commandes"
+	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	container.add_child(caption)
 
 
 func get_type_id() -> Module.ModuleType:
