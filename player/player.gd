@@ -4,6 +4,8 @@ extends CharacterBody2D
 ## - Flèches, ZQSD ou WASD (actions move_*, project.godot) : déplacement direct.
 ## - Bouton gauche maintenu : le personnage se rend vers la souris ; il
 ##   s'arrête dès que le bouton est relâché.
+## Légère inertie : il accélère et freine en une fraction de seconde
+## (ACCELERATION ; vitesse actuelle move_velocity, jointe à chaque ordre).
 ## Il est placé dans le vaisseau (nœud Ship/Crew) : il avance et tourne avec
 ## lui, et sa position comme sa cible sont exprimées dans le repère du vaisseau.
 ## La caméra tourne avec le vaisseau (ignore_rotation désactivé) : le vaisseau
@@ -37,6 +39,10 @@ const OTHER_PLAYER_COLORS: Array[Color] = [
 ## déplacement minimal (px) de la cible pour la renvoyer.
 const TARGET_SEND_INTERVAL := 0.1
 const TARGET_SEND_DISTANCE := 24.0
+## Légère inertie : le personnage rejoint la vitesse voulue (et s'arrête) avec
+## cette accélération (px/s²) ; à `speed` = 300, il démarre ou s'arrête en
+## environ 0,1 s.
+const ACCELERATION := 2400.0
 ## Intervalle (s) des corrections de position pendant un déplacement.
 const CORRECTION_INTERVAL := 0.5
 ## Vitesse de résorption d'un écart de position (proportion par seconde).
@@ -48,6 +54,9 @@ var target: Vector2  # dans le repère du vaisseau
 var has_target: bool = false
 ## Direction donnée au clavier (nulle sans touche enfoncée).
 var input_dir := Vector2.ZERO
+## Vitesse actuelle dans le repère du vaisseau (px/s) : elle rejoint la vitesse
+## voulue à ACCELERATION près (inertie), et part avec chaque ordre.
+var move_velocity := Vector2.ZERO
 
 # Dernier ordre envoyé (joueur local).
 var _sent_dir := Vector2.ZERO
@@ -84,6 +93,9 @@ func _physics_process(delta: float) -> void:
 
 	velocity = _compute_velocity(delta)
 	move_and_slide()
+	# Vitesse après glissement contre les murs : l'élan ne traverse pas un mur.
+	if move_velocity != Vector2.ZERO:
+		move_velocity = velocity.rotated(-_get_ship_rotation())
 
 	if is_local:
 		_send_updates(delta)
@@ -118,17 +130,24 @@ func _read_input() -> void:
 ## qui est aussi celui de l'écran puisque la caméra tourne avec lui ;
 ## move_and_slide applique la vitesse dans le repère du monde : on la tourne
 ## donc de l'orientation du vaisseau (synchronisée entre les joueurs).
+## Inertie : move_velocity rejoint la vitesse voulue à ACCELERATION près ; vers
+## une cible, la vitesse voulue baisse assez tôt pour s'arrêter dessus.
 func _compute_velocity(delta: float) -> Vector2:
 	var ship_rotation := _get_ship_rotation()
+	var wanted := Vector2.ZERO
 	if input_dir != Vector2.ZERO:
-		return input_dir.rotated(ship_rotation) * speed
-	if has_target:
+		wanted = input_dir * speed
+	elif has_target:
 		var to_target := target - position
-		if to_target.length() <= speed * delta:
+		var distance := to_target.length()
+		if distance <= maxf(move_velocity.length(), ACCELERATION * delta) * delta:
+			# Dernier petit pas pile sur la cible.
 			has_target = false
-			return (to_target / delta).rotated(ship_rotation)  # dernier petit pas pile sur la cible
-		return to_target.normalized().rotated(ship_rotation) * speed
-	return Vector2.ZERO
+			move_velocity = Vector2.ZERO
+			return (to_target / delta).rotated(ship_rotation)
+		wanted = to_target / distance * minf(speed, sqrt(2.0 * ACCELERATION * distance))
+	move_velocity = move_velocity.move_toward(wanted, ACCELERATION * delta)
+	return move_velocity.rotated(ship_rotation)
 
 
 ## Orientation (radians) du repère du personnage, c'est-à-dire du vaisseau.
@@ -158,18 +177,19 @@ func _send_order() -> void:
 	_sent_has_target = has_target
 	_time_since_order = 0.0
 	_time_since_correction = 0.0
-	_receive_order.rpc(position, input_dir, target, has_target)
+	_receive_order.rpc(position, move_velocity, input_dir, target, has_target)
 
 
 ## Envoie l'état du personnage à un joueur qui vient d'arriver (hôte).
 ## L'hôte connaît l'état de tous les personnages, puisqu'il les simule.
 func send_state_to(peer_id: int) -> void:
-	_receive_state_from_host.rpc_id(peer_id, position, input_dir, target, has_target)
+	_receive_state_from_host.rpc_id(peer_id, position, move_velocity, input_dir, target, has_target)
 
 
 @rpc("authority", "call_remote", "reliable")
-func _receive_order(from: Vector2, dir: Vector2, new_target: Vector2, new_has_target: bool) -> void:
-	_apply_order(from, dir, new_target, new_has_target)
+func _receive_order(from: Vector2, new_velocity: Vector2, dir: Vector2, new_target: Vector2,
+		new_has_target: bool) -> void:
+	_apply_order(from, new_velocity, dir, new_target, new_has_target)
 
 
 ## Correction périodique : une correction perdue est remplacée par la suivante.
@@ -180,12 +200,15 @@ func _receive_correction(at: Vector2) -> void:
 
 ## L'hôte n'a pas autorité sur ce personnage : on vérifie l'expéditeur.
 @rpc("any_peer", "call_remote", "reliable")
-func _receive_state_from_host(at: Vector2, dir: Vector2, new_target: Vector2, new_has_target: bool) -> void:
+func _receive_state_from_host(at: Vector2, new_velocity: Vector2, dir: Vector2, new_target: Vector2,
+		new_has_target: bool) -> void:
 	if multiplayer.get_remote_sender_id() == 1 and not is_multiplayer_authority():
-		_apply_order(at, dir, new_target, new_has_target)
+		_apply_order(at, new_velocity, dir, new_target, new_has_target)
 
 
-func _apply_order(from: Vector2, dir: Vector2, new_target: Vector2, new_has_target: bool) -> void:
+func _apply_order(from: Vector2, new_velocity: Vector2, dir: Vector2, new_target: Vector2,
+		new_has_target: bool) -> void:
+	move_velocity = new_velocity
 	input_dir = dir
 	target = new_target
 	has_target = new_has_target

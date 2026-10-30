@@ -61,6 +61,11 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
     `peer_connected` sur `Network._on_peer_connected`).
   - L'hôte de test doit vivre plus longtemps que le client : à sa fermeture, le
     client recharge la scène et perd l'état reçu.
+  - Dans Git Bash, définir les variables (chemins) dans une commande à part
+    avant `( … ) &` : une affectation chaînée par `&&` à la commande lancée en
+    arrière-plan n'existe que dans celle-ci, et le client ne démarre pas.
+  - Tests qui lisent la souris : le vrai curseur (l'utilisateur travaille à côté)
+    fausse `get_mouse_position` ; tester plutôt la logique directement.
 - Pas de tests automatisés : vérifier aussi en jeu, à deux instances pour tout ce
   qui touche au réseau.
 
@@ -89,7 +94,15 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - **À fournir par chaque type** : `get_type_id()`, `get_ideal_power()` (W),
   `get_possible_failures()`. `get_size()` (cases) vaut par défaut `DEFAULT_SIZE`
   (16 × 16) ; le Couloir la règle par instance (`size_cells`). `get_min_power()`
-  vaut par défaut la moitié de l'optimale.
+  vaut par défaut la moitié de l'optimale. `get_mass()` (kg) vaut par défaut
+  `DEFAULT_MASS` (1 t).
+- **Réacteur** (`module_reacteur.gd`) : tuyère sur le côté `nozzle_side` (réglé
+  par instance, dessinée hors du mur), poussée en sens opposé, `MAX_THRUST`
+  (20 kN) × alimentation / optimum s'il est opérationnel (allumé, au-dessus du
+  minimum ; l'état cassé n'est pas pris en compte). Flamme au bout de la tuyère
+  (nœud enfant `Flame`, vacillante) de longueur `FLAME_LENGTH` × `flame_level`,
+  réglé à chaque pas par `Ship._apply_forces` (part de poussée fournie), rien
+  sous `FLAME_MIN_LEVEL` (triangle trop plat, erreur de triangulation).
 - **Valeurs d'instance** : `power_supplied` (W), `room_temperature` et
   `machine_temperature` (°C, réels, affichés arrondis), `state` (0–1),
   `grid_position` (cases, réglée dans la scène). `doorways` et `neighbors` sont
@@ -125,18 +138,42 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 
 ### Vaisseau — `ship/ship.gd`
 - Place ses modules enfants selon leur `grid_position`, l'ensemble centré sur le
-  vaisseau ; l'avant est à droite. Disposition actuelle (64 × 64 cases) : trois
-  colonnes de salles séparées par deux couloirs verticaux de 8 × 64 cases.
+  vaisseau ; l'avant est à droite. Le jeu visera à construire son vaisseau en
+  ajoutant des modules sur la grille : la forme n'a pas à être un rectangle.
+  Disposition actuelle : trois colonnes de salles séparées par deux couloirs
+  verticaux de 8 × 64 cases ; réacteur arrière dans la colonne de gauche ;
+  réacteurs latéraux par paires avant / arrière (`ReacteurHautArriere`,
+  `ReacteurBasArriere` collés à la colonne de gauche, `ReacteurHautAvant` collé
+  à celle de droite, `ReacteurBasAvant` dans son coin bas) : une paire du même
+  côté pousse sans tourner, une paire en diagonale tourne sans pousser. Pas de
+  réacteur à l'avant.
 - Deux modules qui partagent au moins `MIN_SHARED_WALL` cases de mur sont voisins,
   avec une porte au milieu de la partie commune (verticale ou pivotée de 90°).
 - Le nœud `Structure` (généré, non sauvegardé) contient les collisions des murs, les
   `LightOccluder2D` (murs fusionnés par droite : `_merge_wall_lines`) et les `Door`.
-- Avance à `speed` (px/s, vers son avant, c'est-à-dire sa droite) et tourne à
-  `angular_speed` (°/s), **simulé par chaque joueur**. Changer l'une des vitesses
-  sur l'hôte (ou les deux, `set_motion`) envoie position, orientation et vitesses
-  aux autres (`_receive_motion`) ; un joueur les demande par `request_motion`,
-  bornées à `max_speed` / `max_angular_speed` par l'hôte. L'hôte
-  corrige aussi position et orientation toutes les `MOTION_SYNC_INTERVAL` s
+- **Mouvement à inertie, physique stricte**, **simulé par chaque joueur**
+  (`_apply_forces`) : `velocity` (px/s, monde, vitesse du centre de masse) et
+  `angular_speed` (°/s) se conservent sans poussée (valeurs de départ en
+  `@export`, nulles : immobile au début). Échelle : `PIXELS_PER_METER`
+  (1 case = 1 m).
+  - Chaque réacteur pousse là où il est : force / `get_total_mass` sur le centre
+    de masse (`get_center_of_mass`), couple = poussée × `get_torque_arm` (bras de
+    levier signé autour du centre de masse) / `get_moment_of_inertia` (modules =
+    plaques). Le vaisseau tourne autour de son centre de masse (l'origine du
+    nœud, centre de la grille, tourne autour de lui).
+  - Commandes `thrust_command` (direction voulue, repère du monde, longueur ≤ 1)
+    et `turn_command` (−1 à 1, part du couple maximal dans ce sens,
+    `get_max_angular_acceleration(sens)`). `_allocate_throttles` répartit entre
+    les réacteurs (part 0 à 1 chacun) : visée = toute la poussée possible dans
+    la direction voulue, rien sur le côté, le couple demandé ; solution la plus
+    proche aux moindres carrés (couple pondéré par `TORQUE_WEIGHT`). Un réacteur
+    hors de l'axe fait aussi tourner : le régulateur du pilote compense.
+  - Un joueur demande les commandes (`request_controls`) ; l'hôte les borne,
+    les refuse sans pilotage alimenté et les annule si celui-ci perd son
+    alimentation (`set_controls`), puis envoie commandes, position, orientation
+    et vitesses à tous (`_receive_motion`). Chaque machine calcule les forces
+    avec l'alimentation qu'elle connaît. L'hôte
+  corrige aussi position, orientation et vitesses toutes les `MOTION_SYNC_INTERVAL` s
   (`_receive_position`), écart résorbé en douceur, ou d'un coup au-delà de
   `CORRECTION_SNAP_DISTANCE` / `CORRECTION_SNAP_ANGLE`.
 - Les joueurs sont enfants de `Ship/Crew` : coordonnées dans le repère du vaisseau
@@ -175,18 +212,29 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   survol, appliqué dans le dessin car un conteneur remet `scale` à 1) →
   `Piloting.enter()` (nœud `HUD/Piloting`, local à chaque joueur).
 - En `TRANSITION_TIME` s, la caméra du joueur (restée enfant du personnage) se
-  décale sur un point `LOOK_AHEAD` cases devant le centre du vaisseau, annule sa
+  décale sur un point `LOOK_AHEAD` cases devant le centre du vaisseau (0 pour
+  le moment : vaisseau centré), annule sa
   rotation et dézoome de `ZOOM_FACTOR` (`_apply_camera`, tours entiers retirés
   avec `_turns`).
-- Clavier (`move_*`) ou bouton gauche maintenu : direction voulue ; le vaisseau
-  y tourne (`STEER_GAIN`) et avance selon l'alignement, s'arrête sans commande.
-  Vitesses demandées à l'hôte au plus toutes les `SEND_INTERVAL` s. Clic droit :
+- **Souris seulement** (le clavier ne pilote pas). Bouton gauche maintenu :
+  direction centre de l'écran → souris (pas vaisseau → souris : la caméra vise
+  devant le vaisseau et tournerait la cible avec lui), arrondie à
+  `THRUST_ANGLE_STEP`, montrée par un trait et un cercle (`_draw`, comme la
+  cible du personnage). Le vaisseau pousse dans cette direction et y tourne son
+  avant. Bouton relâché : ni poussée ni rotation commandée, stabilisation
+  (rotation annulée). Régulateur
+  `_turn_command` : vitesse visée permettant de s'arrêter sur la cible
+  (`BRAKING_MARGIN`), rattrapée en `TURN_RESPONSE` s, arrondie à `TURN_STEP` ;
+  accélérations propres à chaque sens (freinage avec le sens opposé à l'écart).
+  Sans poussée, le vaisseau garde sa vitesse ; sans réacteur avant, freiner une
+  marche avant demande de se retourner.
+  Commandes demandées à l'hôte au plus toutes les `SEND_INTERVAL` s. Clic droit :
   sortie. `Piloting.is_active()` (transitions comprises) immobilise le personnage
   et bloque la fenêtre de module.
 - Sans module de pilotage à son alimentation minimale (`Ship.is_helm_powered`),
   aucune commande : le pilote n'envoie rien (avertissement `UNPOWERED_TEXT`),
-  l'hôte refuse les demandes, le vaisseau garde son mouvement. Le mode
-  reste accessible.
+  l'hôte refuse les demandes et annule les commandes en cours, le vaisseau garde
+  son mouvement (inertie). Le mode reste accessible.
 
 ### Portes — `ship/door.gd`
 - S'ouvrent quand un `CharacterBody2D` entre dans leur zone, se referment
@@ -196,10 +244,16 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - ENet, 8 joueurs max. L'hôte (id 1) fait autorité sur le vaisseau, les portes et
   l'alimentation ; chaque joueur fait autorité sur son personnage.
 - Personnages créés par `PlayerSpawner` (fonction de spawn personnalisée) ; nom du
-  nœud = id réseau.
+  nœud = id réseau. Ils apparaissent au centre du premier module de pilotage,
+  espacés de `Ship.SPAWN_SPACING` (`Ship.get_spawn_position`).
 - Commandes : actions `move_left/right/up/down` (`project.godot`) = flèches, ZQSD
   et WASD, liées à la lettre de la touche (`keycode`), pas à sa place ; bouton
   gauche maintenu : aller vers la souris, arrêt au relâchement.
+- Légère inertie : `Player.move_velocity` (repère du vaisseau) rejoint la vitesse
+  voulue à `ACCELERATION` près ; vers une cible, la vitesse voulue baisse pour
+  s'arrêter dessus. Reprise de la vitesse après `move_and_slide` (glissement
+  contre les murs). Elle part avec chaque ordre (`_receive_order`,
+  `_receive_state_from_host`).
 - **Pas de `MultiplayerSynchronizer`** : un joueur envoie ses **ordres** (direction
   clavier, cible souris) quand ils changent, avec sa position de départ ; chaque
   machine simule le déplacement. Position finale à l'arrêt, correction toutes les
@@ -244,7 +298,8 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - Centre : `Module.build_interface` (bouton d'exemple par défaut) ; pour des
   éléments propres à un type, la redéfinir dans son `module_*.gd`. Côté : état (« Intact » si `state` > `BROKEN_THRESHOLD`, sinon « Cassé »),
   consommation, températures de la machine et de la pièce.
-- `ModuleWindow.is_open` immobilise le personnage local. Les boutons de la
+- `ModuleWindow.is_open` immobilise le personnage local ; statique, remis à faux
+  dans `_exit_tree` (scène rechargée quand l'hôte part). Les boutons de la
   fenêtre ne prennent pas le focus (Espace sert à fermer).
 - Locale à chaque joueur : seules les commandes passent par l'hôte.
 
@@ -265,9 +320,9 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   (éclairage orangé), sans autre conséquence pour l'instant.
 - Le mobilier est seulement dessiné : il ne bloque pas les déplacements.
 - Pilotage : plusieurs joueurs peuvent piloter à la fois (dernière demande
-  gagnante) ; un pilote qui se déconnecte laisse le vaisseau à sa dernière
-  vitesse. En vue dézoomée, le brouillard de guerre assombrit presque tout le
-  vaisseau.
+  gagnante ; si le dernier pilote se déconnecte, `Ship.release_controls_of`
+  annule ses commandes). En vue dézoomée, le brouillard de guerre assombrit
+  presque tout le vaisseau.
 - Effets de chaleur et de givre inaccessibles avec les puissances actuelles (voir
   Température) : seuils ou règles à revoir avec la surchauffe.
 - Un message de connexion déjà affiché ne change pas de langue avant le suivant.

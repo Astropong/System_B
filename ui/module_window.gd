@@ -80,6 +80,13 @@ func _ready() -> void:
 	_prompt.hide()
 
 
+## is_open est statique : à remettre à faux si la scène est rechargée (hôte
+## parti) fenêtre ouverte, sinon le nouveau personnage resterait immobile.
+func _exit_tree() -> void:
+	if _module != null:
+		close()
+
+
 func _input(event: InputEvent) -> void:
 	if not event.is_action_pressed("interact") or event.is_echo() or Piloting.is_active():
 		return

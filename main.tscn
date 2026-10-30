@@ -39,6 +39,26 @@ script = ExtResource("15_tourelles")
 script = ExtResource("4_reacteur")
 grid_position = Vector2i(0, 16)
 
+[node name="ReacteurHautArriere" type="Node2D" parent="Ship" unique_id=1748203961]
+script = ExtResource("4_reacteur")
+grid_position = Vector2i(0, -16)
+nozzle_side = 1
+
+[node name="ReacteurBasArriere" type="Node2D" parent="Ship" unique_id=1302958417]
+script = ExtResource("4_reacteur")
+grid_position = Vector2i(0, 64)
+nozzle_side = 3
+
+[node name="ReacteurHautAvant" type="Node2D" parent="Ship" unique_id=1867340295]
+script = ExtResource("4_reacteur")
+grid_position = Vector2i(48, -16)
+nozzle_side = 1
+
+[node name="ReacteurBasAvant" type="Node2D" parent="Ship" unique_id=1450928736]
+script = ExtResource("4_reacteur")
+grid_position = Vector2i(48, 48)
+nozzle_side = 3
+
 [node name="Generateur" type="Node2D" parent="Ship" unique_id=1063155301]
 script = ExtResource("3_generateur")
 grid_position = Vector2i(0, 32)

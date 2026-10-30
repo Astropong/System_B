@@ -151,6 +151,7 @@ func _on_peer_connected(peer_id: int) -> void:
 
 func _on_peer_disconnected(peer_id: int) -> void:
 	print("Joueur %d déconnecté." % peer_id)
+	_ship.release_controls_of(peer_id)
 	var player := _crew.get_node_or_null(str(peer_id))
 	if player:
 		player.queue_free()

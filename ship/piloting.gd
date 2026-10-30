@@ -6,19 +6,21 @@ extends Control
 ## En TRANSITION_TIME secondes, la caméra du joueur s'éloigne (zoom divisé par
 ## ZOOM_FACTOR), vise LOOK_AHEAD cases devant le centre du vaisseau et cesse
 ## de tourner avec lui :
-## l'espace reste fixe à l'écran, c'est le vaisseau qui tourne. Le clavier
-## (flèches, ZQSD, WASD) et le bouton gauche maintenu dirigent alors le
-## vaisseau au lieu du personnage, immobile ; le clic droit quitte le mode
-## (même transition en sens inverse).
+## l'espace reste fixe à l'écran, c'est le vaisseau qui tourne. La souris
+## commande alors le vaisseau (pas le clavier) ; le personnage reste immobile.
+## Le clic droit quitte le mode (même transition en sens inverse).
 ##
-## Diriger : le vaisseau tourne vers la direction voulue (touches, ou du
-## centre du vaisseau vers la souris) et avance d'autant plus vite qu'il y est
-## aligné ; sans commande, il s'arrête. Les vitesses sont demandées à l'hôte
-## (Ship.request_motion), qui fait autorité sur le vaisseau.
+## Commandes (envoyées à l'hôte par Ship.request_controls, qui fait autorité) :
+## bouton gauche maintenu : direction du centre de l'écran vers la souris
+## (montrée par un trait). Le vaisseau pousse dans cette direction, par les
+## réacteurs dont la tuyère est sur le bord opposé (voir Ship), et tourne son
+## avant vers elle. Bouton relâché : plus de poussée, et les réacteurs annulent
+## la rotation (stabilisation).
+## Sans poussée, le vaisseau garde sa vitesse (inertie).
 ## Si aucun module de pilotage n'atteint son alimentation minimale
 ## (Ship.is_helm_powered), les commandes sont sans effet : rien n'est envoyé
-## (l'hôte refuse aussi), le vaisseau garde son mouvement et un avertissement
-## remplace l'indication.
+## (l'hôte annule aussi les commandes), le vaisseau garde son mouvement et un
+## avertissement remplace l'indication.
 ## Rien n'empêche deux joueurs de piloter en même temps : la dernière demande
 ## l'emporte.
 
@@ -26,19 +28,27 @@ extends Control
 const ZOOM_FACTOR := 20.0
 ## Durée (s) du passage d'une vue à l'autre.
 const TRANSITION_TIME := 0.5
-## Vitesse de rotation demandée par degré d'écart avec la direction voulue (°/s).
-const STEER_GAIN := 2.0
-## Écart (°) en dessous duquel le vaisseau ne tourne plus.
-const STEER_DEAD_ZONE := 1.0
-## La vitesse d'avancée est arrondie à un SPEED_STEPS-ième de Ship.max_speed.
-const SPEED_STEPS := 10
-## Intervalle minimal (s) entre deux demandes de vitesses.
+## Rotation vers la souris : la vitesse de rotation visée permet de s'arrêter
+## pile sur la cible en freinant à BRAKING_MARGIN × l'accélération maximale ;
+## l'écart à cette vitesse est rattrapé en TURN_RESPONSE secondes.
+const BRAKING_MARGIN := 0.8
+const TURN_RESPONSE := 0.5
+## La commande de rotation est arrondie à TURN_STEP près (moins d'envois).
+const TURN_STEP := 0.1
+## Intervalle minimal (s) entre deux demandes de commandes.
 const SEND_INTERVAL := 0.1
-## Distance (px) au centre du vaisseau en dessous de laquelle la souris est ignorée.
-const MOUSE_DEAD_ZONE := Module.CELL_SIZE * 4.0
-## Point visé par la caméra : à LOOK_AHEAD cases devant le centre du vaisseau.
-const LOOK_AHEAD := 64.0
-const HINT_TEXT := "Pilotage : flèches, ZQSD, WASD ou clic gauche maintenu pour diriger le vaisseau   |   clic droit : quitter"
+## Distance (px d'écran) au centre de l'écran en dessous de laquelle la souris
+## est ignorée.
+const MOUSE_DEAD_ZONE := 32.0
+## La direction de poussée est arrondie à THRUST_ANGLE_STEP degrés (moins d'envois).
+const THRUST_ANGLE_STEP := 5.0
+## Trait vers la souris (voir _draw).
+const AIM_LINE_COLOR := Color(1, 1, 1, 0.25)
+const AIM_RADIUS := 8.0
+## Point visé par la caméra : à LOOK_AHEAD cases devant le centre du vaisseau
+## (0 pour le moment : vaisseau au centre de l'écran).
+const LOOK_AHEAD := 0.0
+const HINT_TEXT := "Pilotage : clic gauche maintenu pour diriger le vaisseau vers la souris   |   clic droit : quitter"
 const UNPOWERED_TEXT := "Pilotage hors service : alimentation insuffisante   |   clic droit : quitter"
 const UNPOWERED_COLOR := Color(1.0, 0.35, 0.3)
 
@@ -58,10 +68,14 @@ var _base_zoom := Vector2.ONE
 var _turns: float = 0.0
 ## Le bouton gauche qui a cliqué le volant doit être relâché avant de diriger.
 var _mouse_armed: bool = false
-var _sent_speed: float = -1.0
-var _sent_angular_speed: float = 0.0
+var _sent_thrust := Vector2.ZERO
+var _sent_turn: float = 0.0
+## Faux pour forcer le prochain envoi (entrée, retour de l'alimentation).
+var _sent_valid: bool = false
 var _time_since_send: float = 0.0
 var _hint: Label
+## Vrai pendant que le bouton gauche dirige le vaisseau (trait affiché).
+var _aiming: bool = false
 
 
 ## Vrai pendant le mode pilotage, transitions comprises : le personnage local
@@ -110,7 +124,7 @@ func _enter() -> void:
 	_base_zoom = _camera.zoom
 	_turns = roundf(ship.rotation / TAU) * TAU
 	_mouse_armed = false
-	_sent_speed = -1.0  # force le premier envoi
+	_sent_valid = false
 	_time_since_send = SEND_INTERVAL
 	_state = State.ENTERING
 	_hint.show()
@@ -119,14 +133,16 @@ func _enter() -> void:
 func _leave() -> void:
 	_state = State.LEAVING
 	_hint.hide()
+	queue_redraw()  # efface le trait
 	# Les tours faits pendant le pilotage ne sont pas à refaire en sens inverse.
 	var turns := roundf(ship.rotation / TAU) * TAU
 	if turns != _turns:
 		_turns = turns
 		_apply_camera()
 		_camera.reset_physics_interpolation()
-	if ship.is_helm_powered() and (_sent_speed != 0.0 or _sent_angular_speed != 0.0):
-		_send(0.0, 0.0)
+	# Plus de poussée ni de rotation commandée : le vaisseau continue sur sa lancée.
+	if ship.is_helm_powered() and (not _sent_valid or _sent_thrust != Vector2.ZERO or _sent_turn != 0.0):
+		_send(Vector2.ZERO, 0.0)
 
 
 func _input(event: InputEvent) -> void:
@@ -173,39 +189,67 @@ func _apply_camera() -> void:
 	_camera.zoom = _base_zoom.lerp(_base_zoom / ZOOM_FACTOR, weight)
 
 
-## Direction voulue (clavier, sinon souris) → vitesses demandées à l'hôte ;
-## rien sans alimentation du pilotage.
+## Bouton gauche maintenu → poussée et rotation vers la souris, demandées à
+## l'hôte ; relâché → stabilisation seule ; rien sans alimentation du pilotage.
 func _steer(delta: float) -> void:
 	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		_mouse_armed = true
 	var powered := ship.is_helm_powered()
 	_show_hint(powered)
 	if not powered:
-		_sent_speed = -1.0  # renvoi forcé au retour de l'alimentation
+		_sent_valid = false  # renvoi forcé au retour de l'alimentation
+		if _aiming:
+			_aiming = false
+			queue_redraw()
 		return
-	var direction := Vector2.ZERO
-	var keys := Input.get_vector("move_left", "move_right", "move_up", "move_down")
-	if keys != Vector2.ZERO:
-		# Directions de l'écran, ramenées dans le monde.
-		direction = keys.rotated(_camera.global_rotation)
-	elif _mouse_armed and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-		var to_mouse := ship.get_global_mouse_position() - ship.global_position
-		if to_mouse.length() > MOUSE_DEAD_ZONE:
-			direction = to_mouse
 
-	var new_speed := 0.0
-	var new_angular_speed := 0.0
-	if direction != Vector2.ZERO:
-		var error := rad_to_deg(angle_difference(ship.rotation, direction.angle()))
-		if absf(error) > STEER_DEAD_ZONE:
-			new_angular_speed = clampf(roundf(error * STEER_GAIN), -ship.max_angular_speed, ship.max_angular_speed)
-		var alignment := clampf(cos(deg_to_rad(error)), 0.0, 1.0)
-		new_speed = ship.max_speed * roundf(alignment * SPEED_STEPS) / SPEED_STEPS
+	var thrust := Vector2.ZERO
+	var target_error := 0.0  # écart (°) entre l'avant et la direction voulue
+	_aiming = false
+	if _mouse_armed and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		# Direction du centre de l'écran vers la souris : mesurée depuis le
+		# vaisseau, elle bougerait avec la caméra, qui vise devant lui et
+		# tourne donc avec lui (le vaisseau courrait après sa cible).
+		var to_mouse := get_viewport().get_mouse_position() - get_viewport_rect().size / 2.0
+		if to_mouse.length() > MOUSE_DEAD_ZONE:
+			_aiming = true
+			# Direction de l'écran ramenée dans le monde, arrondie (moins d'envois).
+			var angle := snappedf(to_mouse.rotated(_camera.global_rotation).angle(), deg_to_rad(THRUST_ANGLE_STEP))
+			thrust = Vector2.from_angle(angle)
+			target_error = rad_to_deg(angle_difference(ship.rotation, angle))
+	var turn := _turn_command(target_error)
+	queue_redraw()
 
 	_time_since_send += delta
-	if (new_speed != _sent_speed or new_angular_speed != _sent_angular_speed) \
+	if (not _sent_valid or thrust != _sent_thrust or turn != _sent_turn) \
 			and _time_since_send >= SEND_INTERVAL:
-		_send(new_speed, new_angular_speed)
+		_send(thrust, turn)
+
+
+## Trait vers la souris pendant le pilotage, comme la cible du personnage :
+## du centre de l'écran (point d'où se mesure la direction) au cercle.
+func _draw() -> void:
+	if not _aiming or _state == State.OFF or _state == State.LEAVING:
+		return
+	var mouse := get_viewport().get_mouse_position()
+	draw_line(get_viewport_rect().size / 2.0, mouse, AIM_LINE_COLOR, 1.0)
+	draw_arc(mouse, AIM_RADIUS, 0.0, TAU, 24, Color.WHITE, 2.0)
+
+
+## Commande de rotation (-1 à 1) pour annuler l'écart [param error] (°) à la
+## cible, en arrivant dessus à vitesse nulle ; écart nul : stabilisation.
+## Les réacteurs ne font pas forcément tourner autant dans les deux sens : le
+## freinage se calcule avec l'accélération du sens opposé à l'écart, la
+## correction avec celle du sens demandé (rien si aucun réacteur ne le peut).
+func _turn_command(error: float) -> float:
+	var braking := ship.get_max_angular_acceleration(-signf(error))  # °/s²
+	var wanted_speed := signf(error) * sqrt(2.0 * BRAKING_MARGIN * braking * absf(error))
+	var gap := wanted_speed - ship.angular_speed
+	var acceleration := ship.get_max_angular_acceleration(signf(gap))
+	if acceleration <= 0.0:
+		return 0.0
+	var command := gap / (acceleration * TURN_RESPONSE)
+	return snappedf(clampf(command, -1.0, 1.0), TURN_STEP)
 
 
 ## Indication des commandes, ou avertissement si le pilotage n'est pas alimenté.
@@ -217,8 +261,9 @@ func _show_hint(powered: bool) -> void:
 		_hint.add_theme_color_override("font_color", UNPOWERED_COLOR)
 
 
-func _send(new_speed: float, new_angular_speed: float) -> void:
-	_sent_speed = new_speed
-	_sent_angular_speed = new_angular_speed
+func _send(thrust: Vector2, turn: float) -> void:
+	_sent_thrust = thrust
+	_sent_turn = turn
+	_sent_valid = true
 	_time_since_send = 0.0
-	ship.request_motion(new_speed, new_angular_speed)
+	ship.request_controls(thrust, turn)

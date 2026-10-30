@@ -8,13 +8,17 @@ extends Node2D
 ## Pour changer la composition, ajoutez ou supprimez des modules enfants dans
 ## la scène et réglez leur position dans la grille.
 ##
+## Mouvement : le vaisseau garde sa vitesse ([member velocity]) et sa vitesse
+## de rotation ([member angular_speed]) tant que rien ne le pousse (inertie).
+## Les commandes du pilote ([member thrust_command], [member turn_command])
+## font agir les réacteurs (ModuleReacteur) : accélération = poussée / masse
+## totale des modules, accélération angulaire = couple / moment d'inertie.
 ##
-## Multijoueur : chaque joueur fait avancer et tourner le vaisseau lui-même, à
-## [member speed] et [member angular_speed]. L'hôte fait autorité : il envoie
-## chaque changement de vitesse (avec la position et l'orientation), et une
-## correction de position et d'orientation toutes les MOTION_SYNC_INTERVAL
-## secondes ; les autres résorbent l'écart en douceur. Tous les joueurs voient
-## ainsi le vaisseau sous la même orientation.
+## Multijoueur : chaque joueur simule le mouvement lui-même. L'hôte fait
+## autorité : il envoie chaque changement de commandes (avec la position,
+## l'orientation et les vitesses), et une correction toutes les
+## MOTION_SYNC_INTERVAL secondes ; les autres résorbent l'écart en douceur.
+## Tous les joueurs voient ainsi le vaisseau sous la même orientation.
 ## L'hôte applique aussi les règles d'alimentation (voir power_rules.gd)
 ## PowerRules.UPDATE_RATE fois par seconde, puis les règles de température
 ## (voir temperature_rules.gd), et envoie le résultat aux autres.
@@ -29,38 +33,45 @@ const CORRECTION_SNAP_DISTANCE := 96.0
 const CORRECTION_SNAP_ANGLE := 10.0
 ## Longueur minimale (cases) d'un mur partagé pour y placer une porte.
 const MIN_SHARED_WALL := 4
+## Écart vertical (px) entre les joueurs à leur apparition (voir get_spawn_position).
+const SPAWN_SPACING := 64.0
 
-## Vitesse d'avancée du vaisseau vers son avant (sa droite), en pixels par
-## seconde (1 case = 48 px). Peut varier en cours de partie : à modifier sur
-## l'hôte, qui transmet le changement aux autres joueurs.
-@export var speed: float = 10.0:
-	set(value):
-		if value == speed:
-			return
-		speed = value
-		_send_motion_change()
+## Échelle des forces : 1 case = 1 m (la taille du personnage).
+const PIXELS_PER_METER := Module.CELL_SIZE
+## Bras de levier (m) en dessous duquel un réacteur ne fait pas tourner.
+const TORQUE_ARM_MIN := 0.01
+## Répartition entre réacteurs (voir _allocate_throttles) : poids d'un couple
+## face à une force (1/m : un couple de 20 N·m compte comme 1 N), et nombre de
+## passes de calcul.
+const TORQUE_WEIGHT := 1.0 / 20.0
+const ALLOCATION_SWEEPS := 20
 
-## Vitesse de rotation du vaisseau, en degrés par seconde (positif : sens
-## horaire à l'écran). Même fonctionnement que [member speed].
-@export var angular_speed: float = 10.0:
-	set(value):
-		if value == angular_speed:
-			return
-		angular_speed = value
-		_send_motion_change()
+## Vitesse du centre de masse du vaisseau dans le monde (px/s). Réglée ici au
+## départ, puis changée seulement par la poussée des réacteurs (inertie : sans
+## poussée, le vaisseau la garde).
+@export var velocity := Vector2.ZERO
 
-## Vitesses maximales que le joueur aux commandes peut demander (px/s, °/s),
-## voir Piloting et request_motion.
-@export var max_speed: float = 400.0
-@export var max_angular_speed: float = 30.0
+## Vitesse de rotation du vaisseau autour de son centre de masse, en degrés
+## par seconde (positif : sens horaire à l'écran). Même fonctionnement que
+## [member velocity].
+@export var angular_speed: float = 0.0
+
+## Commandes du pilote, décidées par l'hôte (voir request_controls) et
+## connues de tous : direction de poussée voulue, dans le repère du monde
+## (longueur 0 à 1)...
+var thrust_command := Vector2.ZERO
+## ... et rotation voulue (-1 à 1, positif : sens horaire) : part de leur
+## poussée que donnent les réacteurs qui font tourner dans ce sens.
+var turn_command: float = 0.0
 
 var _arranging: bool = false
-# Vrai pendant set_motion : les deux vitesses partent en un seul envoi.
-var _setting_motion: bool = false
 var _rules_timer: float = 0.0
 var _motion_timer: float = 0.0
 var _position_error := Vector2.ZERO
 var _rotation_error: float = 0.0  # radians
+# Joueur qui a envoyé les dernières commandes (hôte) : s'il part, elles sont
+# annulées (voir release_controls_of).
+var _pilot_id: int = 0
 
 
 func _ready() -> void:
@@ -68,48 +79,187 @@ func _ready() -> void:
 	arrange_modules()
 
 
+## Chaque machine applique les mêmes forces aux mêmes commandes (et à
+## l'alimentation des réacteurs qu'elle connaît) ; l'hôte corrige les écarts.
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
-	position += Vector2.RIGHT.rotated(rotation) * speed * delta
-	# Angle non replié dans [-180°, 180°] : le saut de 360° serait interpolé.
-	rotation += deg_to_rad(angular_speed) * delta
+	_apply_forces(delta)
 	if is_multiplayer_authority():
+		# Pilotage privé d'alimentation : plus aucune commande.
+		if (thrust_command != Vector2.ZERO or turn_command != 0.0) and not is_helm_powered():
+			set_controls(Vector2.ZERO, 0.0)
 		_update_module_rules(delta)
 		_motion_timer += delta
 		if _motion_timer >= MOTION_SYNC_INTERVAL:
 			_motion_timer = 0.0
-			_receive_position.rpc(position, rotation)
+			_receive_position.rpc(position, rotation, velocity, angular_speed)
 	else:
 		_apply_correction(delta)
 
 
+# --- Masse et forces ----------------------------------------------------------
+
+## Masse totale du vaisseau (kg) : somme des masses de ses modules.
+func get_total_mass() -> float:
+	var mass := 0.0
+	for m in get_modules():
+		mass += m.get_mass()
+	return mass
+
+
+## Centre de masse (m), dans le repère du vaisseau (origine : centre de la grille).
+func get_center_of_mass() -> Vector2:
+	var mass := 0.0
+	var moment := Vector2.ZERO
+	for m in get_modules():
+		mass += m.get_mass()
+		moment += _module_offset(m) * m.get_mass()
+	return Vector2.ZERO if mass <= 0.0 else moment / mass
+
+
+## Moment d'inertie (kg·m²) autour du centre de masse : chaque module est une
+## plaque rectangulaire de masse uniforme.
+func get_moment_of_inertia() -> float:
+	var center := get_center_of_mass()
+	var inertia := 0.0
+	for m in get_modules():
+		var size := Vector2(m.get_size()) * Module.CELL_SIZE / PIXELS_PER_METER
+		inertia += m.get_mass() * ((_module_offset(m) - center).length_squared() + size.length_squared() / 12.0)
+	return inertia
+
+
+## Bras de levier d'un réacteur (m) : couple (N·m) par newton de poussée autour
+## du centre de masse [param center] (positif : sens horaire, nul si sa poussée
+## passe par le centre de masse).
+func get_torque_arm(reactor: ModuleReacteur, center: Vector2) -> float:
+	var r := _module_offset(reactor) - center
+	var d := reactor.get_thrust_direction()
+	return r.x * d.y - r.y * d.x
+
+
+## Accélération angulaire maximale (°/s², positive) dans le sens [param direction]
+## (signe : positif = horaire) : couple de tous les réacteurs opérationnels qui
+## font tourner dans ce sens, divisé par le moment d'inertie.
+func get_max_angular_acceleration(direction: float) -> float:
+	var center := get_center_of_mass()
+	var torque := 0.0
+	for m in get_modules():
+		if m is ModuleReacteur:
+			var arm := get_torque_arm(m, center)
+			if absf(arm) > TORQUE_ARM_MIN and signf(arm) == signf(direction):
+				torque += m.get_thrust() * absf(arm)
+	var inertia := get_moment_of_inertia()
+	return 0.0 if inertia <= 0.0 else rad_to_deg(torque / inertia)
+
+
+## Répartition des commandes entre les réacteurs [param reactors] : part de
+## sa poussée que fournit chacun (0 à 1). Visée : toute la poussée possible
+## dans la direction voulue [param wanted] (repère du vaisseau), aucune force
+## sur le côté, et le couple turn_command × couple maximal dans ce sens. Ce
+## n'est pas toujours atteignable (un réacteur hors de l'axe fait aussi
+## tourner) : on prend la répartition la plus proche, aux moindres carrés
+## (descente par coordonnées, bornée à [0, 1], ALLOCATION_SWEEPS passes).
+## Le calcul est le même sur toutes les machines.
+func _allocate_throttles(reactors: Array[ModuleReacteur], wanted: Vector2, center: Vector2) -> PackedFloat64Array:
+	var throttles := PackedFloat64Array()
+	throttles.resize(reactors.size())
+	# Effet de chaque réacteur à pleine poussée : force (N) et couple pondéré.
+	var effects: Array[Vector3] = []
+	var max_forward := 0.0
+	var max_torque := 0.0
+	for r in reactors:
+		var thrust := r.get_thrust()
+		var direction := r.get_thrust_direction()
+		var arm := get_torque_arm(r, center)
+		effects.append(Vector3(direction.x, direction.y, arm * TORQUE_WEIGHT) * thrust)
+		max_forward += maxf(direction.dot(wanted), 0.0) * thrust
+		if absf(arm) > TORQUE_ARM_MIN and signf(arm) == signf(turn_command):
+			max_torque += absf(arm) * thrust
+	var target := Vector3(wanted.x * max_forward, wanted.y * max_forward,
+			signf(turn_command) * absf(turn_command) * max_torque * TORQUE_WEIGHT)
+	# Écart entre l'effet obtenu et la visée, mis à jour à chaque changement.
+	var residual := -target
+	for sweep in ALLOCATION_SWEEPS:
+		for i in reactors.size():
+			var effect := effects[i]
+			var norm := effect.length_squared()
+			if norm <= 0.0:
+				continue
+			var value := clampf(throttles[i] - effect.dot(residual) / norm, 0.0, 1.0)
+			residual += effect * (value - throttles[i])
+			throttles[i] = value
+	return throttles
+
+
+## Physique stricte : chaque réacteur pousse là où il est. La somme des forces
+## accélère le centre de masse, la somme de leurs couples fait tourner le
+## vaisseau autour de lui (un réacteur hors de l'axe fait donc aussi tourner).
+## Règle aussi la flamme de chaque réacteur (sa part de poussée).
+func _apply_forces(delta: float) -> void:
+	var center := get_center_of_mass()
+	var wanted := thrust_command.rotated(-rotation)  # repère du vaisseau
+	var reactors: Array[ModuleReacteur] = []
+	for m in get_modules():
+		if m is ModuleReacteur:
+			reactors.append(m)
+	var throttles := _allocate_throttles(reactors, wanted, center)
+	var force := Vector2.ZERO  # N, repère du vaisseau
+	var torque := 0.0  # N·m
+	for i in reactors.size():
+		var reactor := reactors[i]
+		reactor.flame_level = throttles[i]
+		var thrust := reactor.get_thrust() * throttles[i]
+		force += reactor.get_thrust_direction() * thrust
+		torque += get_torque_arm(reactor, center) * thrust
+	var mass := get_total_mass()
+	var inertia := get_moment_of_inertia()
+	if mass > 0.0:
+		velocity += (force / mass * PIXELS_PER_METER).rotated(rotation) * delta
+	if inertia > 0.0:
+		angular_speed += rad_to_deg(torque / inertia) * delta
+	# Le centre de masse avance à la vitesse du vaisseau ; l'origine du nœud
+	# tourne autour de lui.
+	var center_offset := center * PIXELS_PER_METER
+	var center_position := position + center_offset.rotated(rotation) + velocity * delta
+	# Angle non replié dans [-180°, 180°] : le saut de 360° serait interpolé.
+	rotation += deg_to_rad(angular_speed) * delta
+	position = center_position - center_offset.rotated(rotation)
+
+
+## Centre d'un module par rapport au centre du vaisseau (m).
+func _module_offset(m: Module) -> Vector2:
+	return (m.position + m.get_pixel_size() / 2.0) / PIXELS_PER_METER
+
+
+# --- Commandes et synchronisation du mouvement -------------------------------
+
 ## Envoie le mouvement du vaisseau à un joueur qui vient d'arriver (hôte).
 func send_motion_to(peer_id: int) -> void:
-	_receive_motion.rpc_id(peer_id, position, rotation, speed, angular_speed)
+	_receive_motion.rpc_id(peer_id, position, rotation, velocity, angular_speed, thrust_command, turn_command)
 
 
-## Change les deux vitesses à la fois, en un seul envoi aux autres (hôte).
-func set_motion(new_speed: float, new_angular_speed: float) -> void:
-	_setting_motion = true
-	var changed := new_speed != speed or new_angular_speed != angular_speed
-	speed = new_speed
-	angular_speed = new_angular_speed
-	_setting_motion = false
-	if changed:
-		_send_motion_change()
+## Change les commandes de poussée et de rotation et les envoie aux autres,
+## avec l'état du mouvement (hôte).
+func set_controls(thrust: Vector2, turn: float) -> void:
+	if thrust == thrust_command and turn == turn_command:
+		return
+	thrust_command = thrust
+	turn_command = turn
+	if is_inside_tree() and is_multiplayer_authority():
+		_receive_motion.rpc(position, rotation, velocity, angular_speed, thrust_command, turn_command)
 
 
-## Demande à l'hôte de changer les vitesses (joueur aux commandes, voir
-## Piloting) ; l'hôte les borne à max_speed et max_angular_speed, et ignore
-## la demande si le pilotage n'est pas alimenté (is_helm_powered).
-func request_motion(new_speed: float, new_angular_speed: float) -> void:
-	_request_motion.rpc_id(1, new_speed, new_angular_speed)
+## Demande à l'hôte de changer les commandes (joueur aux commandes, voir
+## Piloting) ; l'hôte les borne et ignore la demande si le pilotage n'est pas
+## alimenté (is_helm_powered).
+func request_controls(thrust: Vector2, turn: float) -> void:
+	_request_controls.rpc_id(1, thrust, turn)
 
 
 ## Vrai si un module de pilotage a au moins son alimentation minimale : sans
 ## cela, les commandes de pilotage sont sans effet (le vaisseau garde son
-## mouvement).
+## mouvement, par inertie).
 func is_helm_powered() -> bool:
 	for m in get_modules():
 		if m is ModulePilotage and m.power_supplied >= m.get_min_power():
@@ -117,33 +267,40 @@ func is_helm_powered() -> bool:
 	return false
 
 
+## Un joueur quitte la partie (hôte) : s'il pilotait, plus de poussée ni de
+## rotation commandée (le vaisseau garde son mouvement, par inertie).
+func release_controls_of(peer_id: int) -> void:
+	if peer_id == _pilot_id:
+		_pilot_id = 0
+		set_controls(Vector2.ZERO, 0.0)
+
+
 @rpc("any_peer", "call_local", "reliable")
-func _request_motion(new_speed: float, new_angular_speed: float) -> void:
+func _request_controls(thrust: Vector2, turn: float) -> void:
 	if not multiplayer.is_server() or not is_helm_powered():
 		return
-	set_motion(clampf(new_speed, 0.0, max_speed),
-			clampf(new_angular_speed, -max_angular_speed, max_angular_speed))
+	_pilot_id = multiplayer.get_remote_sender_id()
+	set_controls(thrust.limit_length(1.0), clampf(turn, -1.0, 1.0))
 
 
-func _send_motion_change() -> void:
-	if _setting_motion:
-		return
-	if is_inside_tree() and not Engine.is_editor_hint() and is_multiplayer_authority():
-		_receive_motion.rpc(position, rotation, speed, angular_speed)
-
-
-## Changement de vitesse (ou arrivée dans la partie) : envoi fiable.
+## Changement de commandes (ou arrivée dans la partie) : envoi fiable.
 @rpc("authority", "call_remote", "reliable")
-func _receive_motion(new_position: Vector2, new_rotation: float, new_speed: float,
-		new_angular_speed: float) -> void:
-	speed = new_speed
+func _receive_motion(new_position: Vector2, new_rotation: float, new_velocity: Vector2,
+		new_angular_speed: float, thrust: Vector2, turn: float) -> void:
+	thrust_command = thrust
+	turn_command = turn
+	velocity = new_velocity
 	angular_speed = new_angular_speed
 	_correct_to(new_position, new_rotation)
 
 
 ## Correction périodique : une correction perdue est remplacée par la suivante.
+## Les vitesses sont reprises telles quelles, position et orientation en douceur.
 @rpc("authority", "call_remote", "unreliable_ordered")
-func _receive_position(new_position: Vector2, new_rotation: float) -> void:
+func _receive_position(new_position: Vector2, new_rotation: float, new_velocity: Vector2,
+		new_angular_speed: float) -> void:
+	velocity = new_velocity
+	angular_speed = new_angular_speed
 	_correct_to(new_position, new_rotation)
 
 
@@ -261,15 +418,19 @@ func get_modules() -> Array[Module]:
 	return result
 
 
-## Position d'apparition du n-ième joueur : au centre du premier couloir,
-## en décalant chaque joueur verticalement.
+## Position d'apparition du n-ième joueur : au centre du premier module de
+## pilotage (à défaut, du premier module), en décalant chaque joueur
+## verticalement de SPAWN_SPACING.
 func get_spawn_position(index: int) -> Vector2:
-	var center := Vector2.ZERO
-	for m in get_modules():
-		if m is ModuleCouloir:
-			center = m.position + m.get_pixel_size() / 2.0
+	var modules := get_modules()
+	if modules.is_empty():
+		return Vector2.ZERO
+	var room: Module = modules[0]
+	for m in modules:
+		if m is ModulePilotage:
+			room = m
 			break
-	return center + Vector2(0, (index % 5 - 2) * 64)
+	return room.position + room.get_pixel_size() / 2.0 + Vector2(0, (index % 5 - 2) * SPAWN_SPACING)
 
 
 ## Envoie l'état de toutes les portes à un joueur qui vient d'arriver (hôte).

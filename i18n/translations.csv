@@ -36,5 +36,5 @@ keys,fr,en
 "Arrêt","Arrêt","Off"
 "Alimentation cible","Alimentation cible","Target power"
 "Prendre les commandes","Prendre les commandes","Take the helm"
-"Pilotage : flèches, ZQSD, WASD ou clic gauche maintenu pour diriger le vaisseau   |   clic droit : quitter","Pilotage : flèches, ZQSD, WASD ou clic gauche maintenu pour diriger le vaisseau   |   clic droit : quitter","Piloting: arrow keys, WASD, ZQSD or hold left click to steer the ship   |   right click: exit"
 "Pilotage hors service : alimentation insuffisante   |   clic droit : quitter","Pilotage hors service : alimentation insuffisante   |   clic droit : quitter","Helm offline: insufficient power   |   right click: exit"
+"Pilotage : clic gauche maintenu pour diriger le vaisseau vers la souris   |   clic droit : quitter","Pilotage : clic gauche maintenu pour diriger le vaisseau vers la souris   |   clic droit : quitter","Piloting: hold left click to steer the ship toward the mouse   |   right click: exit"

@@ -37,6 +37,9 @@ const CELL_SIZE := 48.0
 ## Taille par défaut d'un module (cases).
 const DEFAULT_SIZE := Vector2i(16, 16)
 
+## Masse par défaut d'un module (kg) : 1 tonne (voir get_mass).
+const DEFAULT_MASS := 1000.0
+
 ## Largeur de l'ouverture d'une porte entre deux modules (2 cases).
 const DOOR_SIZE := CELL_SIZE * 2.0
 
@@ -193,6 +196,12 @@ var neighbors: Array[Module] = []
 ## l'alimentation optimale. Une classe fille peut la redéfinir.
 func get_min_power() -> float:
 	return get_ideal_power() * 0.5
+
+
+## Masse du module (kg) : DEFAULT_MASS par défaut. Une classe fille peut la
+## redéfinir. Le vaisseau en déduit sa masse et son inertie (voir Ship).
+func get_mass() -> float:
+	return DEFAULT_MASS
 
 
 ## Alimentation cible maximale (W) : optimum × [member max_power_ratio].
