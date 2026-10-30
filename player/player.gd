@@ -2,7 +2,8 @@ class_name Player
 extends CharacterBody2D
 ## Personnage vu de dessus, dessiné comme un rond.
 ## - Flèches du clavier : déplacement direct.
-## - Clic gauche (ou bouton maintenu) : le personnage se rend vers la souris.
+## - Bouton gauche maintenu : le personnage se rend vers la souris ; il
+##   s'arrête dès que le bouton est relâché.
 ## Il est placé dans le vaisseau (nœud Ship/Crew) : il avance et tourne avec
 ## lui, et sa position comme sa cible sont exprimées dans le repère du vaisseau.
 ## La caméra tourne avec le vaisseau (ignore_rotation désactivé) : le vaisseau
@@ -98,10 +99,13 @@ func _read_input() -> void:
 		has_target = false
 		return
 
-	# Souris : tant que le bouton gauche est enfoncé, la cible suit le curseur.
+	# Souris : tant que le bouton gauche est enfoncé, la cible suit le curseur ;
+	# relâché, le personnage s'arrête aussitôt.
 	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		target = _global_to_parent(get_global_mouse_position())
 		has_target = true
+	else:
+		has_target = false
 
 	# Clavier : les actions ui_* sont déjà associées aux flèches.
 	input_dir = Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")

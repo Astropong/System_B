@@ -220,7 +220,7 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   déplacement sont déjà envoyés : il resterait à faire simuler l'hôte seul.
 - L'alimentation et la température partent 10 fois par seconde même sans changement :
   principal trafic restant.
-- Pas de calcul d'itinéraire : un clic hors de l'axe d'une porte fait buter contre le mur.
+- Pas de calcul d'itinéraire : viser hors de l'axe d'une porte fait buter contre le mur.
 - Pannes des modules à définir (`get_possible_failures`) ; `state` seulement affiché
   (valeurs aléatoires de test).
 - Surchauffe et surtension à venir : le curseur permet de dépasser l'optimum

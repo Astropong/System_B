@@ -8,7 +8,7 @@ keys,fr,en
 "Adresse invalide : %s","Adresse invalide : %s","Invalid address: %s"
 "Connexion à %s...","Connexion à %s...","Connecting to %s..."
 "Échec de la connexion.","Échec de la connexion.","Connection failed."
-"Flèches : se déplacer   |   Clic gauche (ou maintenu) : aller vers la souris   |   Les portes s'ouvrent à l'approche","Flèches : se déplacer   |   Clic gauche (ou maintenu) : aller vers la souris   |   Les portes s'ouvrent à l'approche","Arrow keys: move   |   Left click (or hold): walk to the mouse   |   Doors open as you approach"
+"Flèches : se déplacer   |   Clic gauche maintenu : aller vers la souris   |   Les portes s'ouvrent à l'approche","Flèches : se déplacer   |   Clic gauche maintenu : aller vers la souris   |   Les portes s'ouvrent à l'approche","Arrow keys: move   |   Hold left click: walk to the mouse   |   Doors open as you approach"
 "Pilotage","Pilotage","Cockpit"
 "Infirmerie","Infirmerie","Infirmary"
 "Réacteur","Réacteur","Reactor"
