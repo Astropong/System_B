@@ -84,9 +84,13 @@ func _ready() -> void:
 
 
 ## L'espace autour du vaisseau ancré : l'inverse de sa place dans l'espace.
+## Réaffecté seulement s'il change : sinon tous les nœuds de tous les autres
+## vaisseaux seraient recalculés à chaque image.
 func _process(_delta: float) -> void:
 	var anchor := Ship.anchor
-	transform = anchor.get_interpolated_space_transform().affine_inverse() if anchor else Transform2D.IDENTITY
+	var space := anchor.get_interpolated_space_transform().affine_inverse() if anchor else Transform2D.IDENTITY
+	if space != transform:
+		transform = space
 
 
 ## Crée les vaisseaux de départ (hôte, à la création de la partie).

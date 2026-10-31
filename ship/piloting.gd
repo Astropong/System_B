@@ -209,7 +209,8 @@ func _physics_process(delta: float) -> void:
 		_hint.hide()
 		Ship.hull_view = false
 		return
-	# Personnage passé dans un autre vaisseau : fin immédiate du mode.
+	# Personnage passé dans un autre vaisseau (l'ancien a pu disparaître) :
+	# fin immédiate du mode, caméra remise dans la vue du joueur.
 	var player := _camera.get_parent() as Player
 	if not is_instance_valid(ship) or player.get_ship() != ship:
 		_state = State.OFF
@@ -217,7 +218,9 @@ func _physics_process(delta: float) -> void:
 		_aiming = false
 		_hint.hide()
 		queue_redraw()
-		_apply_camera()
+		_camera.position = Vector2.ZERO
+		_camera.rotation = 0.0
+		_camera.zoom = _base_zoom
 		_camera.reset_physics_interpolation()
 		Ship.hull_view = false
 		return

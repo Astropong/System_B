@@ -318,6 +318,13 @@ func request_target_power(watts: float) -> void:
 	_request_target_power.rpc_id(1, watts)
 
 
+## Hôte : vrai si l'auteur de la demande en cours est à bord du vaisseau du
+## module (une demande partie juste avant un changement de vaisseau est ignorée).
+func _is_requester_aboard() -> bool:
+	var ship := get_parent() as Ship
+	return ship != null and ship.has_crew_member(multiplayer.get_remote_sender_id())
+
+
 ## Envoie l'état des commandes (marche, cible) à un joueur qui arrive (hôte).
 func send_controls_to(peer_id: int) -> void:
 	_receive_controls.rpc_id(peer_id, is_on, target_power)
@@ -325,7 +332,7 @@ func send_controls_to(peer_id: int) -> void:
 
 @rpc("any_peer", "call_local", "reliable")
 func _request_switch(on: bool) -> void:
-	if not multiplayer.is_server() or not can_be_switched_off:
+	if not multiplayer.is_server() or not can_be_switched_off or not _is_requester_aboard():
 		return
 	_apply_controls(on, target_power)
 	_receive_controls.rpc(is_on, target_power)
@@ -333,7 +340,7 @@ func _request_switch(on: bool) -> void:
 
 @rpc("any_peer", "call_local", "reliable")
 func _request_target_power(watts: float) -> void:
-	if not multiplayer.is_server() or not adjustable_power:
+	if not multiplayer.is_server() or not adjustable_power or not _is_requester_aboard():
 		return
 	_apply_controls(is_on, watts)
 	_receive_controls.rpc(is_on, target_power)

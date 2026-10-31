@@ -30,8 +30,13 @@ extends Node2D
 		star_seed = value
 		queue_redraw()
 
+## Le motif d'étoiles se répète tous les WRAP_TILES tuiles : le centre de la
+## vue dans ce plan y est ramené (sans saut visible), sinon il grandirait
+## sans fin et la précision des nombres ferait trembler les étoiles.
+const WRAP_TILES := 1024
+
 var _drawn_tiles: Rect2i
-# Centre de la vue dans le plan des étoiles, et dans le monde à l'image précédente.
+# Centre de la vue dans le plan des étoiles, et dans l'espace à l'image précédente.
 var _star_center := Vector2.ZERO
 var _last_world_center := Vector2.ZERO
 var _has_view: bool = false
@@ -58,8 +63,8 @@ func _process(_delta: float) -> void:
 
 
 ## Place le calque comme la vue du jeu, sans le zoom : le centre de la vue
-## dans le plan des étoiles avance du déplacement de la vue dans le monde
-## multiplié par le zoom (même défilement à l'écran que le monde), avec la
+## dans le plan des étoiles avance du déplacement de la vue dans l'espace
+## multiplié par le zoom (même défilement à l'écran que l'espace), avec la
 ## même orientation.
 func _follow_view() -> void:
 	var layer := get_parent() as CanvasLayer
@@ -79,6 +84,8 @@ func _follow_view() -> void:
 		_star_center = world_center * zoom
 		_has_view = true
 	_last_world_center = world_center
+	var period := tile_size * WRAP_TILES
+	_star_center = Vector2(fposmod(_star_center.x, period), fposmod(_star_center.y, period))
 	var angle := space_view.get_rotation()
 	layer.transform = Transform2D(angle, screen_center - Transform2D(angle, Vector2.ZERO) * _star_center)
 	# La vue peut être tournée : on couvre le disque circonscrit à l'écran.
@@ -99,7 +106,7 @@ func _draw() -> void:
 	var rng := RandomNumberGenerator.new()
 	for tx in range(_drawn_tiles.position.x, _drawn_tiles.end.x):
 		for ty in range(_drawn_tiles.position.y, _drawn_tiles.end.y):
-			rng.seed = hash(Vector3i(tx, ty, star_seed))
+			rng.seed = hash(Vector3i(posmod(tx, WRAP_TILES), posmod(ty, WRAP_TILES), star_seed))
 			var origin := Vector2(tx, ty) * tile_size
 			for i in stars_per_tile:
 				var pos := origin + Vector2(rng.randf(), rng.randf()) * tile_size

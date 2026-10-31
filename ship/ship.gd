@@ -575,11 +575,18 @@ func release_controls_of(peer_id: int) -> void:
 		set_controls(Vector2.ZERO, 0.0)
 
 
+## Vrai si le personnage du joueur [param peer_id] est à bord (hôte : seul
+## un joueur à bord peut piloter le vaisseau ou commander ses modules).
+func has_crew_member(peer_id: int) -> bool:
+	return get_node_or_null("Crew/%d" % peer_id) != null
+
+
 @rpc("any_peer", "call_local", "reliable")
 func _request_controls(thrust: Vector2, turn: float) -> void:
-	if not multiplayer.is_server() or not is_helm_powered():
+	var sender := multiplayer.get_remote_sender_id()
+	if not multiplayer.is_server() or not is_helm_powered() or not has_crew_member(sender):
 		return
-	_pilot_id = multiplayer.get_remote_sender_id()
+	_pilot_id = sender
 	set_controls(thrust.limit_length(1.0), clampf(turn, -1.0, 1.0))
 
 

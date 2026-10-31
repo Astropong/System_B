@@ -24,6 +24,15 @@ const MIN_DAMAGE_SPEED := 0.5
 ## Chevauchement toléré (px), sans correction de position (évite de trembler
 ## au contact).
 const PENETRATION_SLOP := 1.0
+## Intervalle minimal (s) entre deux envois du mouvement d'un même vaisseau
+## après un choc : un vaisseau qui en pousse un autre subit un petit choc à
+## chaque pas. Un envoi retardé part dès la fin de l'intervalle.
+const MOTION_SEND_INTERVAL := 0.1
+
+# Vaisseaux (identifiants d'instance) dont le mouvement est à envoyer, et date
+# (ms) de leur dernier envoi.
+var _pending_motion := {}
+var _last_motion_send := {}
 
 
 func _ready() -> void:
@@ -53,9 +62,25 @@ func _physics_process(_delta: float) -> void:
 				# Positions changées : rectangles à recalculer.
 				hulls[i] = _get_hull(ships[i])
 				hulls[j] = _get_hull(ships[j])
+	_send_pending_motions()
 
 
-## Rectangles des modules d'un vaisseau dans le monde (4 coins chacun) et
+## Envoie le mouvement des vaisseaux heurtés, au plus toutes les
+## MOTION_SEND_INTERVAL s chacun.
+func _send_pending_motions() -> void:
+	var now := Time.get_ticks_msec()
+	for id: int in _pending_motion.keys():
+		var ship := instance_from_id(id) as Ship
+		if ship == null:
+			_pending_motion.erase(id)
+			_last_motion_send.erase(id)
+		elif now - _last_motion_send.get(id, -1000000) >= MOTION_SEND_INTERVAL * 1000.0:
+			ship.send_motion()
+			_last_motion_send[id] = now
+			_pending_motion.erase(id)
+
+
+## Rectangles des modules d'un vaisseau dans l'espace (4 coins chacun) et
 ## cercle qui les contient tous (tri rapide des paires de vaisseaux).
 func _get_hull(ship: Ship) -> Dictionary:
 	var xform := ship.get_space_transform()
@@ -78,7 +103,7 @@ func _get_hull(ship: Ship) -> Dictionary:
 
 
 ## Paire de modules la plus enfoncée entre deux vaisseaux : dictionnaire
-## "normal" (unitaire, de a vers b), "depth" (px), "point" (monde), "module_a",
+## "normal" (unitaire, de a vers b), "depth" (px), "point" (espace), "module_a",
 ## "module_b" ; vide s'ils ne se touchent pas.
 func _find_contact(a: Dictionary, b: Dictionary) -> Dictionary:
 	var best := {}
@@ -190,5 +215,5 @@ func _resolve(a: Ship, b: Ship, contact: Dictionary) -> void:
 		b.space_position += n * push * (1.0 - share_a)
 
 	if closing_speed > 0.0:
-		a.send_motion()
-		b.send_motion()
+		_pending_motion[a.get_instance_id()] = true
+		_pending_motion[b.get_instance_id()] = true

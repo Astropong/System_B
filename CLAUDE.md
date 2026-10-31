@@ -125,6 +125,7 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   et `get_max_power()` (optimum × `max_power_ratio`, 1,5 par défaut). État
   synchronisé : `is_on`, `target_power` (négatif = optimum).
   - Le joueur demande à l'hôte (`request_switch`, `request_target_power`), qui
+    vérifie qu'il est à bord (`Ship.has_crew_member`),
     applique et renvoie à tous (`_receive_controls`). Éteint : `power_supplied`
     passe à 0 aussitôt.
 - Dessin : sol quadrillé, aménagement du type (`_draw_details`, à l'échelle réelle),
@@ -151,7 +152,8 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - Les valeurs reçues 10 fois par seconde (alimentation, températures) ne font
   redessiner la salle que si l'affichage change (jauge, températures arrondies).
   De même, ne pas réaffecter la place d'un nœud inchangée (`Ship._apply_forces`
-  ne le fait pas à l'arrêt) : tous ses descendants seraient recalculés.
+  ne le fait pas à l'arrêt, ni `Fleet._process` si le vaisseau ancré ne bouge
+  pas) : tous ses descendants seraient recalculés.
 
 ### Vaisseau — `ship/ship.gd`
 - Place ses modules enfants selon leur `grid_position`, l'ensemble centré sur le
@@ -185,7 +187,9 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   corps rigides (`RESTITUTION`, masse et inertie de chaque vaisseau),
   écartement selon la masse. Les deux modules touchés perdent
   `DAMAGE_PER_SPEED` × vitesse d'impact (m/s) d'état, au-delà de
-  `MIN_DAMAGE_SPEED`. Envoi fiable du mouvement (`Ship.send_motion`) et des
+  `MIN_DAMAGE_SPEED`. Envoi fiable du mouvement (`Ship.send_motion`, au plus
+  toutes les `MOTION_SEND_INTERVAL` s par vaisseau : en poussée continue, un
+  petit choc a lieu à chaque pas ; l'envoi retardé part ensuite) et des
   états après un choc ; les autres machines voient un court chevauchement.
 - Deux modules qui partagent au moins `MIN_SHARED_WALL` cases de mur sont voisins,
   avec une porte au milieu de la partie commune (verticale ou pivotée de 90°).
@@ -221,7 +225,8 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
     proche aux moindres carrés (couple pondéré par `TORQUE_WEIGHT`). Un réacteur
     hors de l'axe fait aussi tourner : le régulateur du pilote compense.
   - Un joueur demande les commandes (`request_controls`) ; l'hôte les borne,
-    les refuse sans pilotage alimenté et les annule si celui-ci perd son
+    les refuse si le joueur n'est pas à bord (`has_crew_member`) ou sans
+    pilotage alimenté, et les annule si celui-ci perd son
     alimentation (`set_controls`), puis envoie commandes, position, orientation
     et vitesses à tous (`_receive_motion`). Chaque machine calcule les forces
     avec l'alimentation qu'elle connaît. L'hôte
@@ -391,7 +396,9 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   la rotation de la vue dans l'espace, pas son zoom ; son centre avance du
   déplacement de la vue dans l'espace (vue × inverse de la place interpolée
   du vaisseau ancré) × le zoom (étoiles au même défilement que les vaisseaux, sans
-  glissement quand seul le zoom change). Étoiles de taille et densité
+  glissement quand seul le zoom change), ramené dans une période de
+  `WRAP_TILES` tuiles (motif répété : pas de perte de précision lors des
+  longs trajets). Étoiles de taille et densité
   constantes, nombre de tuiles constant (en suivant le zoom, le dézoom ×20
   redessinait des milliers de tuiles : ≈ 0,7 s par image).
 
