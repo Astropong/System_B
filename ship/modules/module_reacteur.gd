@@ -12,7 +12,7 @@ extends Module
 
 const ACCENT := Color(1.0, 0.5, 0.15)
 ## Poussée à l'alimentation optimale (N).
-const MAX_THRUST := 10000000.0
+const MAX_THRUST := 1000000.0
 ## Tuyère dessinée hors du mur : longueur et largeurs (cases).
 const NOZZLE_LENGTH := 1.5
 const NOZZLE_INNER_WIDTH := 4.0

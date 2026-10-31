@@ -58,6 +58,12 @@ static var anchor: Ship
 
 ## Échelle des forces : 1 case = 1 m (la taille du personnage).
 const PIXELS_PER_METER := Module.CELL_SIZE
+## Vitesse maximale d'un vaisseau (km/h), et en px/s : la vitesse est bornée
+## à chaque pas (poussée et chocs compris). Au-delà de cette vitesse, rien
+## n'est garanti (collisions entre vaisseaux, précision des positions) : le
+## jeu suppose qu'elle n'est jamais dépassée.
+const MAX_SPEED_KMH := 5000.0
+const MAX_SPEED := MAX_SPEED_KMH / 3.6 * PIXELS_PER_METER
 ## Bras de levier (m) en dessous duquel un réacteur ne fait pas tourner.
 const TORQUE_ARM_MIN := 0.01
 ## Répartition entre réacteurs (voir _allocate_throttles) : poids d'un couple
@@ -487,10 +493,14 @@ func _apply_forces(delta: float) -> void:
 	var inertia := get_moment_of_inertia()
 	if mass > 0.0:
 		velocity += (force / mass * PIXELS_PER_METER).rotated(space_rotation) * delta
+	velocity = velocity.limit_length(MAX_SPEED)
 	if inertia > 0.0:
 		angular_speed += rad_to_deg(torque / inertia) * delta
-	space_position = _drift(space_position, space_rotation, velocity, angular_speed, delta).origin
-	space_rotation = _drift_rotation(space_rotation, angular_speed, delta)
+	# Rien à faire à l'arrêt : réaffecter la place d'un nœud, même inchangée,
+	# fait recalculer celle de tous ses descendants (coûteux).
+	if velocity != Vector2.ZERO or angular_speed != 0.0:
+		space_position = _drift(space_position, space_rotation, velocity, angular_speed, delta).origin
+		space_rotation = _drift_rotation(space_rotation, angular_speed, delta)
 
 
 ## Place après [param duration] s sans poussée, depuis [param from_position]

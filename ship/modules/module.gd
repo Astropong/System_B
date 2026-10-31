@@ -108,26 +108,37 @@ const QUADRANT_SIZE := 3.0
 
 # --- Valeurs propres à chaque instance -------------------------------------
 
-## Puissance électrique effectivement fournie au module (W).
+## Puissance électrique effectivement fournie au module (W). Ces valeurs sont
+## reçues 10 fois par seconde pour tous les modules : la salle n'est
+## redessinée que si ce qu'elle affiche change (jauge, températures arrondies).
 @export var power_supplied: float = 0.0:
 	set(value):
-		power_supplied = maxf(value, 0.0)
-		queue_redraw()
+		value = maxf(value, 0.0)
+		if value != power_supplied:
+			power_supplied = value
+			queue_redraw()
 
 ## Température de la pièce du module (°C), bornée entre TEMPERATURE_MIN et
 ## TEMPERATURE_MAX. Commande les effets de chaleur et de gel.
 @export_range(-273, 227, 0.1, "suffix:°C") var room_temperature: float = TemperatureRules.ROOM_BASE_TEMPERATURE:
 	set(value):
-		room_temperature = clampf(value, TEMPERATURE_MIN, TEMPERATURE_MAX)
+		value = clampf(value, TEMPERATURE_MIN, TEMPERATURE_MAX)
+		if value == room_temperature:
+			return
+		var redraw := roundi(value) != roundi(room_temperature)
+		room_temperature = value
 		_update_climate_effects()
-		queue_redraw()
+		if redraw:
+			queue_redraw()
 
 ## Température de la machine du module (°C), bornée entre TEMPERATURE_MIN et
 ## TEMPERATURE_MAX. Réchauffe la pièce (voir temperature_rules.gd).
 @export_range(-273, 227, 0.1, "suffix:°C") var machine_temperature: float = TemperatureRules.ROOM_BASE_TEMPERATURE:
 	set(value):
-		machine_temperature = clampf(value, TEMPERATURE_MIN, TEMPERATURE_MAX)
-		queue_redraw()
+		value = clampf(value, TEMPERATURE_MIN, TEMPERATURE_MAX)
+		if roundi(value) != roundi(machine_temperature):
+			queue_redraw()
+		machine_temperature = value
 
 ## État du module : 1 = intact, 0 = détruit (voir is_intact).
 @export_range(0.0, 1.0, 0.01) var state: float = 1.0:
@@ -160,6 +171,7 @@ var _light_color: Color = Color.WHITE
 var _flicker_time_left: float = 0.0
 var _flicker_factor: float = 1.0
 var _heat_effect: Node2D
+var _heat_backbuffer: BackBufferCopy
 var _frost_effect: Node2D
 
 ## Place du module dans le vaisseau : coin supérieur gauche, en cases.
@@ -415,10 +427,12 @@ func _create_climate_effects() -> void:
 	# juste avant elle garantit que la salle elle-même y figure. Copie de tout
 	# l'écran : en mode rectangle, la zone copiée ne suit pas la mise à
 	# l'échelle de la fenêtre et laisse des bandes noires.
-	var backbuffer := BackBufferCopy.new()
-	backbuffer.name = "HeatBackBuffer"
-	backbuffer.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT
-	add_child(backbuffer)
+	# Copie active seulement avec l'effet (voir _update_climate_effects) :
+	# chaque copie de l'écran coûte cher (≈ 0,6 ms par module et par image).
+	_heat_backbuffer = BackBufferCopy.new()
+	_heat_backbuffer.name = "HeatBackBuffer"
+	_heat_backbuffer.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT
+	add_child(_heat_backbuffer)
 
 	_heat_effect = _create_effect_layer("HeatEffect", HEAT_SHADER, rect)
 	_frost_effect = _create_effect_layer("FrostEffect", FROST_SHADER, rect)
@@ -445,6 +459,7 @@ func _update_climate_effects() -> void:
 		return
 	_set_effect_strength(_heat_effect, room_temperature > HEAT_THRESHOLD,
 			inverse_lerp(HEAT_THRESHOLD, HEAT_FULL, room_temperature))
+	_heat_backbuffer.visible = _heat_effect.visible
 	_set_effect_strength(_frost_effect, room_temperature < FROST_THRESHOLD,
 			inverse_lerp(FROST_THRESHOLD, FROST_FULL, room_temperature))
 

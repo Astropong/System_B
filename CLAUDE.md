@@ -67,6 +67,16 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
     arrière-plan n'existe que dans celle-ci, et le client ne démarre pas.
   - Tests qui lisent la souris : le vrai curseur (l'utilisateur travaille à côté)
     fausse `get_mouse_position` ; tester plutôt la logique directement.
+- **Performance** (la machine est chargée par ailleurs : comparer dans un même
+  lancement, et répéter) :
+  - calcul seul : `--headless --fixed-fps 60` (un pas physique par image, au
+    plus vite) et temps entre images (`Time.get_ticks_usec`) ; ≈ 0,6 ms par pas
+    (médiane) avec 6 vaisseaux ;
+  - rendu : `Engine.max_fps = 0`, vsync coupée, médiane et 95e centile du
+    temps d'image. Ne pas se fier à `Performance.TIME_PHYSICS_PROCESS` (somme
+    des pas de l'image, dépend du nombre d'images par seconde) ;
+  - réseau : `ENetConnection.pop_statistic` ; ≈ 0,8 ko/s par vaisseau et par
+    client (alimentation et températures), 8 ko/s pour les 6 vaisseaux.
 - Pas de tests automatisés : vérifier aussi en jeu, à deux instances pour tout ce
   qui touche au réseau.
 
@@ -135,7 +145,13 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   `HEAT_THRESHOLD`, givre en dessous de `FROST_THRESHOLD` (température de la pièce).
   - La déformation relit l'écran : `BackBufferCopy` en mode **viewport** (le mode
     rectangle laisse des bandes noires) et `render_mode unshaded` (l'image lue est
-    déjà assombrie par le brouillard).
+    déjà assombrie par le brouillard). La copie n'est visible qu'avec l'effet :
+    chaque copie d'écran coûte ≈ 0,6 ms par image (toujours actives, elles
+    prenaient ≈ 11 ms par image).
+- Les valeurs reçues 10 fois par seconde (alimentation, températures) ne font
+  redessiner la salle que si l'affichage change (jauge, températures arrondies).
+  De même, ne pas réaffecter la place d'un nœud inchangée (`Ship._apply_forces`
+  ne le fait pas à l'arrêt) : tous ses descendants seraient recalculés.
 
 ### Vaisseau — `ship/ship.gd`
 - Place ses modules enfants selon leur `grid_position`, l'ensemble centré sur le
@@ -189,7 +205,9 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   (`_apply_forces`) : `velocity` (px/s, espace, vitesse du centre de masse) et
   `angular_speed` (°/s) se conservent sans poussée (valeurs de départ en
   `@export`, nulles : immobile au début). Échelle : `PIXELS_PER_METER`
-  (1 case = 1 m).
+  (1 case = 1 m). **Vitesse maximale** `MAX_SPEED_KMH` (`MAX_SPEED` en px/s),
+  bornée à chaque pas, chocs compris : le jeu suppose qu'elle n'est jamais
+  dépassée (collisions entre vaisseaux, précision).
   - Chaque réacteur pousse là où il est : force / `get_total_mass` sur le centre
     de masse (`get_center_of_mass`), couple = poussée × `get_torque_arm` (bras de
     levier signé autour du centre de masse) / `get_moment_of_inertia` (modules =
@@ -405,7 +423,10 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - Déplacements non vérifiés par le serveur (triche possible). Les ordres de
   déplacement sont déjà envoyés : il resterait à faire simuler l'hôte seul.
 - L'alimentation et la température partent 10 fois par seconde même sans changement :
-  principal trafic restant.
+  principal trafic restant (≈ 0,8 ko/s par vaisseau et par client, mesuré).
+- Collisions entre vaisseaux fiables jusqu'à ≈ 1 700 km/h de vitesse relative ;
+  jusqu'à `MAX_SPEED_KMH` × 2 de vitesse relative, deux vaisseaux peuvent
+  s'enfoncer trop ou se traverser (pas de détection continue).
 - Pas de calcul d'itinéraire : viser hors de l'axe d'une porte fait buter contre le mur.
 - Pannes des modules à définir (`get_possible_failures`) ; `state` seulement affiché
   (valeurs aléatoires de test).
