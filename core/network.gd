@@ -12,17 +12,27 @@ extends Node
 ## (export en mode « Serveur dédié », ou étiquette ajoutée à une instance de
 ## lancement dans l'éditeur), le jeu crée la partie automatiquement, sans
 ## menu et sans personnage pour lui-même. À lancer de préférence avec --headless.
+##
+## Personnages : enfants du nœud Crew de leur vaisseau (n'importe lequel).
+## L'hôte les crée (_create_player), les fait changer de vaisseau
+## (_transfer_player) et les retire (_remove_player) chez tous par RPC ; un
+## nouveau venu reçoit d'abord ceux qui existent. (Un MultiplayerSpawner ne
+## gère que les enfants d'un seul nœud, et déplacer un nœud qu'il a créé
+## casse son suivi.)
+## Debug : DEBUG_NEXT_SHIP_ACTION fait passer le joueur local au vaisseau
+## suivant (en attendant un vrai moyen de monter à bord).
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
 const DEFAULT_ADDRESS := "127.0.0.1"
+## Action (project.godot, F2) : passer au vaisseau suivant, en mode debug.
+const DEBUG_NEXT_SHIP_ACTION := &"debug_next_ship"
 
 @export var player_scene: PackedScene = preload("res://player/player.tscn")
 
-@onready var _ship: Ship = $"../Ship"
-@onready var _crew: Node2D = $"../Ship/Crew"
+## Vaisseau où apparaissent les joueurs.
+@onready var _ship: Ship = $"../Ships/Ship"
 @onready var _fleet: Fleet = $"../Ships"
-@onready var _spawner: MultiplayerSpawner = $"../PlayerSpawner"
 @onready var _menu: Control = %Menu
 @onready var _host_button: Button = %HostButton
 @onready var _join_button: Button = %JoinButton
@@ -39,9 +49,6 @@ func _ready() -> void:
 			TranslationServer.set_locale(arg.get_slice("=", 1))
 	_setup_language_choice()
 
-	# Chaque joueur crée les personnages lui-même, à partir des données envoyées
-	# par l'hôte (identifiant et position de départ).
-	_spawner.spawn_function = _create_player
 	_host_button.pressed.connect(host)
 	_join_button.pressed.connect(func() -> void: join(_address.text))
 	multiplayer.connected_to_server.connect(_on_connected_to_server)
@@ -121,19 +128,90 @@ func join(address: String) -> void:
 	_set_buttons_disabled(true)
 
 
-## Fait apparaître le personnage d'un joueur chez tout le monde (hôte uniquement).
+## Fait apparaître le personnage d'un joueur chez tout le monde, dans le
+## vaisseau de départ (hôte uniquement).
 func _spawn_player(peer_id: int) -> void:
-	_spawner.spawn({
-		"id": peer_id,
-		"position": _ship.get_spawn_position(_crew.get_child_count()),
-	})
+	var at := _ship.get_spawn_position(_ship.get_node("Crew").get_child_count())
+	_create_player.rpc(peer_id, _ship.get_path(), at)
 
 
-func _create_player(data: Dictionary) -> Node:
-	var player := player_scene.instantiate()
-	player.name = str(data["id"])  # le nom porte l'identifiant réseau du joueur
-	player.position = data["position"]
-	return player
+## Tous les personnages, quel que soit leur vaisseau.
+func get_players() -> Array[Player]:
+	var players: Array[Player] = []
+	for ship in _get_ships():
+		for child in ship.get_node("Crew").get_children():
+			if child is Player:
+				players.append(child)
+	return players
+
+
+func _find_player(peer_id: int) -> Player:
+	for player in get_players():
+		if player.name == str(peer_id):
+			return player
+	return null
+
+
+## Crée le personnage d'un joueur dans le vaisseau [param ship_path] (chemin
+## absolu, le même sur toutes les machines), à la place [param at] (repère
+## du vaisseau).
+@rpc("authority", "call_local", "reliable")
+func _create_player(peer_id: int, ship_path: NodePath, at: Vector2) -> void:
+	var ship := get_node_or_null(ship_path) as Ship
+	if ship == null or _find_player(peer_id) != null:
+		return
+	var player: Player = player_scene.instantiate()
+	player.name = str(peer_id)  # le nom porte l'identifiant réseau du joueur
+	player.position = at
+	ship.get_node("Crew").add_child(player)
+
+
+@rpc("authority", "call_local", "reliable")
+func _remove_player(peer_id: int) -> void:
+	var player := _find_player(peer_id)
+	if player:
+		player.queue_free()
+
+
+## Demande à l'hôte de faire passer le joueur local dans [param ship].
+func request_transfer(ship: Ship) -> void:
+	_request_transfer.rpc_id(1, ship.get_path())
+
+
+## Hôte : le demandeur quitte son vaisseau (et ses commandes, s'il pilotait)
+## pour une place d'apparition du vaisseau visé.
+@rpc("any_peer", "call_local", "reliable")
+func _request_transfer(ship_path: NodePath) -> void:
+	if not multiplayer.is_server():
+		return
+	var peer_id := multiplayer.get_remote_sender_id()
+	var player := _find_player(peer_id)
+	var target := get_node_or_null(ship_path) as Ship
+	if player == null or target == null or target == player.get_ship():
+		return
+	player.get_ship().release_controls_of(peer_id)
+	var at := target.get_spawn_position(target.get_node("Crew").get_child_count())
+	_transfer_player.rpc(peer_id, ship_path, at)
+
+
+@rpc("authority", "call_local", "reliable")
+func _transfer_player(peer_id: int, ship_path: NodePath, at: Vector2) -> void:
+	var player := _find_player(peer_id)
+	var target := get_node_or_null(ship_path) as Ship
+	if player and target:
+		player.transfer_to(target, at)
+
+
+## Debug : F2 fait passer le joueur local au vaisseau suivant (ordre de l'arbre).
+func _unhandled_input(event: InputEvent) -> void:
+	if not DebugMode.is_enabled() or not event.is_action_pressed(DEBUG_NEXT_SHIP_ACTION):
+		return
+	var player := Player.get_local()
+	if player == null or Piloting.is_active() or ModuleWindow.is_open:
+		return
+	var ships := _get_ships()
+	var next: Ship = ships[(ships.find(player.get_ship()) + 1) % ships.size()]
+	request_transfer(next)
 
 
 func _set_buttons_disabled(disabled: bool) -> void:
@@ -145,6 +223,11 @@ func _set_buttons_disabled(disabled: bool) -> void:
 
 func _on_peer_connected(peer_id: int) -> void:
 	print("Joueur %d connecté." % peer_id)
+	# Le nouveau venu reçoit les personnages existants (les vaisseaux de
+	# Fleet lui sont déjà parvenus par leur MultiplayerSpawner), puis le sien
+	# est créé chez tous.
+	for player in get_players():
+		_create_player.rpc_id(peer_id, player.name.to_int(), player.get_ship().get_path(), player.position)
 	_spawn_player(peer_id)
 	# État courant envoyé au nouveau venu : vaisseaux, état des modules, portes
 	# et personnages (ceux-ci ne sont transmis qu'à chaque changement d'ordre).
@@ -153,8 +236,8 @@ func _on_peer_connected(peer_id: int) -> void:
 		ship.send_module_states(peer_id)
 		ship.send_module_controls(peer_id)
 		ship.send_door_states(peer_id)
-	for player in _crew.get_children():
-		if player is Player and player.name != str(peer_id):
+	for player in get_players():
+		if player.name != str(peer_id):
 			player.send_state_to(peer_id)
 
 
@@ -162,9 +245,7 @@ func _on_peer_disconnected(peer_id: int) -> void:
 	print("Joueur %d déconnecté." % peer_id)
 	for ship: Ship in _get_ships():
 		ship.release_controls_of(peer_id)
-	var player := _crew.get_node_or_null(str(peer_id))
-	if player:
-		player.queue_free()
+	_remove_player.rpc(peer_id)
 
 
 # --- Côté joueur qui rejoint -----------------------------------------------

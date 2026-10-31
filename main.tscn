@@ -30,117 +30,114 @@ follow_viewport_enabled = true
 [node name="Starfield" type="Node2D" parent="Background" unique_id=30285419]
 script = ExtResource("1_starfield")
 
-[node name="Ship" type="Node2D" parent="." unique_id=1686920248]
-position = Vector2(576, 324)
-script = ExtResource("2_ship")
-anchored = true
-
-[node name="Tourelles" type="Node2D" parent="Ship" unique_id=1408823561]
-position = Vector2(-1536, -1536)
-script = ExtResource("15_tourelles")
-
-[node name="Reacteur" type="Node2D" parent="Ship" unique_id=1331047277]
-position = Vector2(-1536, -768)
-script = ExtResource("4_reacteur")
-grid_position = Vector2i(0, 16)
-
-[node name="ReacteurHautArriere" type="Node2D" parent="Ship" unique_id=1748203961]
-position = Vector2(-1536, -2304)
-script = ExtResource("4_reacteur")
-nozzle_side = 1
-grid_position = Vector2i(0, -16)
-
-[node name="ReacteurBasArriere" type="Node2D" parent="Ship" unique_id=1302958417]
-position = Vector2(-1536, 1536)
-script = ExtResource("4_reacteur")
-nozzle_side = 3
-grid_position = Vector2i(0, 64)
-
-[node name="ReacteurHautAvant" type="Node2D" parent="Ship" unique_id=1867340295]
-position = Vector2(768, -2304)
-script = ExtResource("4_reacteur")
-nozzle_side = 1
-grid_position = Vector2i(48, -16)
-
-[node name="ReacteurBasAvant" type="Node2D" parent="Ship" unique_id=1450928736]
-position = Vector2(768, 768)
-script = ExtResource("4_reacteur")
-nozzle_side = 3
-grid_position = Vector2i(48, 48)
-
-[node name="Generateur" type="Node2D" parent="Ship" unique_id=1063155301]
-position = Vector2(-1536, 0)
-script = ExtResource("3_generateur")
-adjustable_power = false
-grid_position = Vector2i(0, 32)
-
-[node name="Maintenance" type="Node2D" parent="Ship" unique_id=1734090123]
-position = Vector2(-1536, 768)
-script = ExtResource("11_maintenance")
-grid_position = Vector2i(0, 48)
-
-[node name="Couloir" type="Node2D" parent="Ship" unique_id=1996406122]
-position = Vector2(-768, -1536)
-script = ExtResource("5_couloir")
-size_cells = Vector2i(8, 64)
-adjustable_power = false
-grid_position = Vector2i(16, 0)
-
-[node name="Laboratoire" type="Node2D" parent="Ship" unique_id=1520117644]
-position = Vector2(-384, -1536)
-script = ExtResource("13_laboratoire")
-grid_position = Vector2i(24, 0)
-
-[node name="Infirmerie" type="Node2D" parent="Ship" unique_id=1192837465]
-position = Vector2(-384, -768)
-script = ExtResource("9_infirmerie")
-grid_position = Vector2i(24, 16)
-
-[node name="Oxygene" type="Node2D" parent="Ship" unique_id=1647382910]
-position = Vector2(-384, 0)
-script = ExtResource("10_oxygene")
-grid_position = Vector2i(24, 32)
-
-[node name="Construction" type="Node2D" parent="Ship" unique_id=1873625140]
-position = Vector2(-384, 768)
-script = ExtResource("14_construction")
-grid_position = Vector2i(24, 48)
-
-[node name="Couloir2" type="Node2D" parent="Ship" unique_id=1920503775]
-position = Vector2(384, -1536)
-script = ExtResource("5_couloir")
-size_cells = Vector2i(8, 64)
-adjustable_power = false
-grid_position = Vector2i(40, 0)
-
-[node name="Radar" type="Node2D" parent="Ship" unique_id=1283746501]
-position = Vector2(768, -1536)
-script = ExtResource("16_radar")
-grid_position = Vector2i(48, 0)
-
-[node name="Pilotage" type="Node2D" parent="Ship" unique_id=925782284]
-position = Vector2(768, -768)
-script = ExtResource("6_pilotage")
-grid_position = Vector2i(48, 16)
-
-[node name="Telecommunication" type="Node2D" parent="Ship" unique_id=1958372016]
-position = Vector2(768, 0)
-script = ExtResource("12_telecommunication")
-grid_position = Vector2i(48, 32)
-
-[node name="Crew" type="Node2D" parent="Ship" unique_id=236747848]
-
 [node name="Ships" type="Node2D" parent="." unique_id=1402957318]
 script = ExtResource("19_fleet")
 
 [node name="ShipSpawner" type="MultiplayerSpawner" parent="Ships" unique_id=1570238461]
 spawn_path = NodePath("..")
 
+[node name="Ship" type="Node2D" parent="Ships" unique_id=1686920248]
+position = Vector2(576, 324)
+script = ExtResource("2_ship")
+anchored = true
+
+[node name="Tourelles" type="Node2D" parent="Ships/Ship" unique_id=1408823561]
+position = Vector2(-1536, -1536)
+script = ExtResource("15_tourelles")
+
+[node name="Reacteur" type="Node2D" parent="Ships/Ship" unique_id=1331047277]
+position = Vector2(-1536, -768)
+script = ExtResource("4_reacteur")
+grid_position = Vector2i(0, 16)
+
+[node name="ReacteurHautArriere" type="Node2D" parent="Ships/Ship" unique_id=1748203961]
+position = Vector2(-1536, -2304)
+script = ExtResource("4_reacteur")
+nozzle_side = 1
+grid_position = Vector2i(0, -16)
+
+[node name="ReacteurBasArriere" type="Node2D" parent="Ships/Ship" unique_id=1302958417]
+position = Vector2(-1536, 1536)
+script = ExtResource("4_reacteur")
+nozzle_side = 3
+grid_position = Vector2i(0, 64)
+
+[node name="ReacteurHautAvant" type="Node2D" parent="Ships/Ship" unique_id=1867340295]
+position = Vector2(768, -2304)
+script = ExtResource("4_reacteur")
+nozzle_side = 1
+grid_position = Vector2i(48, -16)
+
+[node name="ReacteurBasAvant" type="Node2D" parent="Ships/Ship" unique_id=1450928736]
+position = Vector2(768, 768)
+script = ExtResource("4_reacteur")
+nozzle_side = 3
+grid_position = Vector2i(48, 48)
+
+[node name="Generateur" type="Node2D" parent="Ships/Ship" unique_id=1063155301]
+position = Vector2(-1536, 0)
+script = ExtResource("3_generateur")
+adjustable_power = false
+grid_position = Vector2i(0, 32)
+
+[node name="Maintenance" type="Node2D" parent="Ships/Ship" unique_id=1734090123]
+position = Vector2(-1536, 768)
+script = ExtResource("11_maintenance")
+grid_position = Vector2i(0, 48)
+
+[node name="Couloir" type="Node2D" parent="Ships/Ship" unique_id=1996406122]
+position = Vector2(-768, -1536)
+script = ExtResource("5_couloir")
+size_cells = Vector2i(8, 64)
+adjustable_power = false
+grid_position = Vector2i(16, 0)
+
+[node name="Laboratoire" type="Node2D" parent="Ships/Ship" unique_id=1520117644]
+position = Vector2(-384, -1536)
+script = ExtResource("13_laboratoire")
+grid_position = Vector2i(24, 0)
+
+[node name="Infirmerie" type="Node2D" parent="Ships/Ship" unique_id=1192837465]
+position = Vector2(-384, -768)
+script = ExtResource("9_infirmerie")
+grid_position = Vector2i(24, 16)
+
+[node name="Oxygene" type="Node2D" parent="Ships/Ship" unique_id=1647382910]
+position = Vector2(-384, 0)
+script = ExtResource("10_oxygene")
+grid_position = Vector2i(24, 32)
+
+[node name="Construction" type="Node2D" parent="Ships/Ship" unique_id=1873625140]
+position = Vector2(-384, 768)
+script = ExtResource("14_construction")
+grid_position = Vector2i(24, 48)
+
+[node name="Couloir2" type="Node2D" parent="Ships/Ship" unique_id=1920503775]
+position = Vector2(384, -1536)
+script = ExtResource("5_couloir")
+size_cells = Vector2i(8, 64)
+adjustable_power = false
+grid_position = Vector2i(40, 0)
+
+[node name="Radar" type="Node2D" parent="Ships/Ship" unique_id=1283746501]
+position = Vector2(768, -1536)
+script = ExtResource("16_radar")
+grid_position = Vector2i(48, 0)
+
+[node name="Pilotage" type="Node2D" parent="Ships/Ship" unique_id=925782284]
+position = Vector2(768, -768)
+script = ExtResource("6_pilotage")
+grid_position = Vector2i(48, 16)
+
+[node name="Telecommunication" type="Node2D" parent="Ships/Ship" unique_id=1958372016]
+position = Vector2(768, 0)
+script = ExtResource("12_telecommunication")
+grid_position = Vector2i(48, 32)
+
+[node name="Crew" type="Node2D" parent="Ships/Ship" unique_id=236747848]
+
 [node name="ShipCollisions" type="Node" parent="." unique_id=1893046152]
 script = ExtResource("20_collisions")
-
-[node name="PlayerSpawner" type="MultiplayerSpawner" parent="." unique_id=522660842]
-spawn_path = NodePath("../Ship/Crew")
 
 [node name="Network" type="Node" parent="." unique_id=1956242022]
 script = ExtResource("7_network")
@@ -157,7 +154,7 @@ offset_left = 16.0
 offset_top = 12.0
 text = "Flèches, ZQSD ou WASD : se déplacer   |   Clic gauche maintenu : aller vers la souris   |   Les portes s'ouvrent à l'approche   |   F11 : plein écran"
 
-[node name="ModuleWindow" type="Control" parent="HUD" unique_id=1765340921 node_paths=PackedStringArray("ship")]
+[node name="ModuleWindow" type="Control" parent="HUD" unique_id=1765340921]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -166,9 +163,8 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("17_module_window")
-ship = NodePath("../../Ship")
 
-[node name="Piloting" type="Control" parent="HUD" unique_id=1583920476 node_paths=PackedStringArray("ship")]
+[node name="Piloting" type="Control" parent="HUD" unique_id=1583920476]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -177,7 +173,6 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("18_piloting")
-ship = NodePath("../../Ship")
 
 [node name="Menu" type="PanelContainer" parent="HUD" unique_id=90238282]
 unique_name_in_owner = true

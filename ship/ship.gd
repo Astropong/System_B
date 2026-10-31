@@ -66,10 +66,12 @@ const TORQUE_ARM_MIN := 0.01
 const TORQUE_WEIGHT := 1.0 / 20.0
 const ALLOCATION_SWEEPS := 20
 
-## Vaisseau ancré (celui des joueurs, un seul par partie) : son nœud reste
-## immobile à l'origine de la scène, et c'est l'espace qui bouge autour de
-## lui (Fleet et ses vaisseaux, fond étoilé). Sa place dans l'espace est
-## alors gardée à part (space_position, space_rotation).
+## Vaisseau ancré (sur chaque machine, celui du joueur local ; un seul à la
+## fois, voir make_anchor ; à cocher dans la scène pour celui du départ) : son
+## nœud reste immobile à l'origine de la scène (top_level), et c'est l'espace
+## qui bouge autour de lui (Fleet et ses vaisseaux, fond étoilé). Sa place
+## dans l'espace est alors gardée à part (space_position, space_rotation).
+## L'ancrage est local : le réseau et les règles ne connaissent que l'espace.
 ## Pourquoi : à grande vitesse, un vaisseau qui bouge dans la scène déplace
 ## ses murs, ses lumières et ses ombres de centaines de pixels par pas
 ## physique. Ni le moteur physique (personnage qui bute sur des murs restés
@@ -144,8 +146,14 @@ func _ready() -> void:
 	add_to_group(GROUP)
 	if not Engine.is_editor_hint():
 		_create_hull()
+		# Équipage : enfants de Crew (créé ici pour les vaisseaux construits
+		# par Fleet), dessinés au-dessus des salles.
+		if get_node_or_null("Crew") == null:
+			var crew := Node2D.new()
+			crew.name = "Crew"
+			add_child(crew)
 		if anchored:
-			_anchor()
+			make_anchor()
 	child_order_changed.connect(arrange_modules)
 	arrange_modules()
 
@@ -155,17 +163,44 @@ func _exit_tree() -> void:
 		anchor = null
 
 
-## Ancre le vaisseau : la place de son nœud dans la scène devient sa place
-## dans l'espace, et le nœud revient à l'origine, où il restera.
+## Ancre ce vaisseau à la place du précédent (le joueur local monte à bord,
+## voir Player). Sans saut visible : chaque vaisseau garde sa place dans
+## l'espace, seule change celle qui est fixe à l'écran.
+func make_anchor() -> void:
+	if anchor == self:
+		return
+	if anchor:
+		anchor._release_anchor()
+	_anchor()
+
+
+## Ancre le vaisseau : la place de son nœud dans l'espace (repère de son
+## parent Fleet) devient sa place gardée à part, et le nœud, indépendant de
+## son parent (top_level), revient à l'origine de la scène, où il restera.
 func _anchor() -> void:
 	_space_position = position
 	_space_rotation = rotation
 	_previous_space_position = _space_position
 	_previous_space_rotation = _space_rotation
+	anchored = true
+	top_level = true
 	position = Vector2.ZERO
 	rotation = 0.0
 	reset_physics_interpolation()
 	anchor = self
+
+
+## Le vaisseau n'est plus ancré : son nœud reprend sa place dans l'espace.
+func _release_anchor() -> void:
+	var at := _space_position
+	var angle := _space_rotation
+	anchored = false
+	top_level = false
+	position = at
+	rotation = angle
+	reset_physics_interpolation()
+	if anchor == self:
+		anchor = null
 
 
 ## Place et orientation dans l'espace (repère de Fleet).

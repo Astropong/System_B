@@ -69,7 +69,8 @@ enum State { OFF, ENTERING, ACTIVE, LEAVING }
 
 static var _instance: Piloting
 
-@export var ship: Ship
+## Vaisseau piloté : celui du personnage local à l'entrée dans le mode.
+var ship: Ship
 
 var _state: State = State.OFF
 ## Avancement de la transition : 0 = vue du joueur, 1 = vue de pilotage.
@@ -161,11 +162,10 @@ func _process(_delta: float) -> void:
 
 
 func _enter() -> void:
-	if _state != State.OFF or ship == null or multiplayer.multiplayer_peer == null:
+	var player := Player.get_local()
+	if _state != State.OFF or player == null:
 		return
-	var player := ship.get_node_or_null("Crew/%d" % multiplayer.get_unique_id())
-	if player == null:
-		return
+	ship = player.get_ship()
 	_camera = player.get_node("Camera2D")
 	_base_zoom = _camera.zoom
 	_turns = roundf(ship.space_rotation / TAU) * TAU
@@ -207,6 +207,18 @@ func _physics_process(delta: float) -> void:
 	if not is_instance_valid(_camera):
 		_state = State.OFF
 		_hint.hide()
+		Ship.hull_view = false
+		return
+	# Personnage passé dans un autre vaisseau : fin immédiate du mode.
+	var player := _camera.get_parent() as Player
+	if not is_instance_valid(ship) or player.get_ship() != ship:
+		_state = State.OFF
+		_progress = 0.0
+		_aiming = false
+		_hint.hide()
+		queue_redraw()
+		_apply_camera()
+		_camera.reset_physics_interpolation()
 		Ship.hull_view = false
 		return
 	match _state:

@@ -6,8 +6,9 @@ extends CharacterBody2D
 ##   s'arrête dès que le bouton est relâché.
 ## Légère inertie : il accélère et freine en une fraction de seconde
 ## (ACCELERATION ; vitesse actuelle move_velocity, jointe à chaque ordre).
-## Il est placé dans le vaisseau (nœud Ship/Crew) : il avance et tourne avec
-## lui, et sa position comme sa cible sont exprimées dans le repère du vaisseau.
+## Il est placé dans un vaisseau (son nœud Crew, voir get_ship ; il peut en
+## changer, transfer_to) : il avance et tourne avec lui, et sa position comme
+## sa cible sont exprimées dans le repère du vaisseau.
 ## La caméra tourne avec le vaisseau (ignore_rotation désactivé) : le vaisseau
 ## reste droit à l'écran, c'est l'espace autour qui tourne.
 ##
@@ -67,11 +68,42 @@ var _time_since_correction: float = 0.0
 # Écart restant à résorber (autres joueurs).
 var _position_error := Vector2.ZERO
 
+static var _local: Player
+
 
 func _enter_tree() -> void:
 	var peer_id := name.to_int()
 	if peer_id > 0:
 		set_multiplayer_authority(peer_id)
+
+
+## Personnage du joueur local, ou null (pas encore créé, serveur dédié).
+static func get_local() -> Player:
+	return _local if is_instance_valid(_local) else null
+
+
+## Vaisseau à bord duquel se trouve le personnage (parent de son nœud Crew).
+func get_ship() -> Ship:
+	var crew := get_parent()
+	return crew.get_parent() as Ship if crew else null
+
+
+## Passe dans le vaisseau [param ship], à la place [param at] (repère de ce
+## vaisseau), sans ordre en cours. Joueur local : ce vaisseau devient le
+## vaisseau ancré (fixe à l'écran, voir Ship.anchored).
+func transfer_to(ship: Ship, at: Vector2) -> void:
+	reparent(ship.get_node("Crew"), false)
+	position = at
+	target = at
+	has_target = false
+	input_dir = Vector2.ZERO
+	move_velocity = Vector2.ZERO
+	_position_error = Vector2.ZERO
+	reset_physics_interpolation()
+	if is_multiplayer_authority():
+		ship.make_anchor()
+		$Camera2D.make_current()
+		$Camera2D.reset_physics_interpolation()
 
 
 func _ready() -> void:
@@ -80,6 +112,8 @@ func _ready() -> void:
 	$Camera2D.enabled = is_local
 	$VisionLight.enabled = is_local
 	if is_local:
+		_local = self
+		get_ship().make_anchor()
 		$Camera2D.make_current()
 	else:
 		# Une couleur différente par joueur distant.

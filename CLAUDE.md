@@ -29,6 +29,7 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
   plein écran / fenêtre. Fenêtre de base 1152 × 648 (valeur par défaut de Godot),
   étirée (`canvas_items`, `expand`) : un écran d'un autre format que 16:9 montre
   un peu plus de monde, sans importance.
+- **F2** (mode debug, action `debug_next_ship`) : passer au vaisseau suivant.
 - Arguments : `--host`, `--join`, `--join=<ip>`, `--release` (désactive le mode debug),
   `--lang=fr|en` (langue de la session, non mémorisée).
 - Serveur dédié : étiquette de fonctionnalité `dedicated_server`, de préférence avec
@@ -147,15 +148,18 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   à celle de droite, `ReacteurBasAvant` dans son coin bas) : une paire du même
   côté pousse sans tourner, une paire en diagonale tourne sans pousser. Pas de
   réacteur à l'avant.
-- **Autres vaisseaux** (`ship/fleet.gd`, nœud `Ships`) : créés et retirés à la
-  volée par l'hôte (`Fleet.spawn_ship(description)`, `Fleet.remove_ship`),
+- **Tous les vaisseaux sont enfants de `Ships`** (`ship/fleet.gd`, repère de
+  l'espace) : celui de départ des joueurs (`Ships/Ship`, dans `main.tscn`) et
+  les autres, créés et retirés à la
+  volée par l'hôte (`Fleet.spawn_ship(description)`, `Fleet.remove_ship`, refusé
+  si un équipage est à bord),
   recréés chez tous (y compris les joueurs qui arrivent) par le
   `MultiplayerSpawner` `Ships/ShipSpawner`. Description : position, modules
   ([type `Module.ModuleType`, place, propriétés parmi `MODULE_PROPERTIES`]),
   rotation et vitesses facultatives ; seul ce dictionnaire passe sur le réseau.
   `Ships` est le repère de l'espace (voir Vaisseau ancré) : positions en espace.
   Au départ, `STARTING_SHIPS` (5 vaisseaux immobiles de 4 modules) autour du
-  nôtre. Le vaisseau des joueurs reste dans `main.tscn` (nœud `Ship`). Tous
+  nôtre. Tous
   sont dans le groupe `Ship.GROUP` : `Network` les synchronise tous (joueur
   qui arrive, états aléatoires, départ d'un pilote). Après un `spawn_ship`,
   envoyer l'état des modules (`send_module_states`).
@@ -198,14 +202,18 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   (`_message_age` : moitié de l'aller-retour ENet), écart résorbé en douceur,
   ou d'un coup au-delà de `CORRECTION_SNAP_DISTANCE` / `CORRECTION_SNAP_ANGLE`
   (seuils agrandis du chemin parcouru en `CORRECTION_SNAP_TIME` s).
-- Les joueurs sont enfants de `Ship/Crew` : coordonnées dans le repère du vaisseau
-  (qui tourne). La caméra du joueur tourne avec le vaisseau (`ignore_rotation`
+- Les personnages sont enfants du nœud `Crew` de leur vaisseau (créé par
+  `Ship._ready` s'il manque) : coordonnées dans le repère du vaisseau
+  (qui tourne). `Player.get_ship()`, `Player.get_local()`. La caméra du joueur tourne avec le vaisseau (`ignore_rotation`
   désactivé dans `player.tscn`) : le vaisseau reste droit à l'écran, l'espace tourne.
-- **Vaisseau ancré** (`anchored`, vrai pour `Ship` dans `main.tscn`, un seul,
-  `Ship.anchor`) : son nœud reste immobile à l'origine de la scène ; sa place
+- **Vaisseau ancré** (`anchored`, `Ship.anchor`, un seul par machine) : celui du
+  joueur local (`make_anchor`, appelé à sa création et à chaque changement de
+  vaisseau ; `Ship` est coché dans `main.tscn` pour le menu et le serveur
+  dédié). Son nœud ignore son parent (`top_level`) et reste immobile à l'origine de la scène ; sa place
   dans l'espace est `space_position` / `space_rotation` (pour les autres
-  vaisseaux, ces propriétés sont leur `position` / `rotation`). C'est l'espace
-  qui bouge : `Fleet` (repère de l'espace, parent des autres vaisseaux) est
+  vaisseaux, ces propriétés sont leur `position` / `rotation`). L'ancrage est
+  local à chaque machine : réseau et règles ne connaissent que l'espace. C'est l'espace
+  qui bouge : `Ships` (`Fleet`) est
   placé à chaque image à l'inverse de `get_interpolated_space_transform()`
   (interpolation faite à la main, coupée sur `Fleet`), et le fond étoilé en
   tient compte. Raison : à grande vitesse (centaines de px par pas), un
@@ -301,9 +309,20 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 ### Réseau — `core/network.gd`, `player/player.gd`
 - ENet, 8 joueurs max. L'hôte (id 1) fait autorité sur le vaisseau, les portes et
   l'alimentation ; chaque joueur fait autorité sur son personnage.
-- Personnages créés par `PlayerSpawner` (fonction de spawn personnalisée) ; nom du
-  nœud = id réseau. Ils apparaissent au centre du premier module de pilotage,
-  espacés de `Ship.SPAWN_SPACING` (`Ship.get_spawn_position`).
+- Personnages créés, déplacés et retirés par l'hôte par RPC (`Network._create_player`,
+  `_transfer_player`, `_remove_player`, chemins absolus des vaisseaux), pas par
+  un `MultiplayerSpawner` (un seul parent possible, et déplacer un nœud qu'il a
+  créé casse son suivi). Nom du nœud = id réseau. Ils apparaissent dans
+  `Ships/Ship`, au centre du premier module de pilotage, espacés de
+  `Ship.SPAWN_SPACING` (`Ship.get_spawn_position`).
+- **Changer de vaisseau** : `Network.request_transfer(vaisseau)` → l'hôte
+  annule les commandes du joueur dans l'ancien, choisit une place d'apparition
+  et envoie `_transfer_player` → `Player.transfer_to` (reparenté, ordres
+  annulés ; joueur local : nouveau vaisseau ancré). Pour l'instant seulement
+  en mode debug : **F2** (action `debug_next_ship`) = vaisseau suivant.
+- Chaque joueur peut piloter le vaisseau où il se trouve : `Piloting` et
+  `ModuleWindow` suivent le vaisseau du personnage local (plus de vaisseau
+  réglé dans la scène). Le mode pilotage s'arrête si le personnage change de vaisseau.
 - Commandes : actions `move_left/right/up/down` (`project.godot`) = flèches, ZQSD
   et WASD, liées à la lettre de la touche (`keycode`), pas à sa place ; bouton
   gauche maintenu : aller vers la souris, arrêt au relâchement.
@@ -320,7 +339,8 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
     Les ordres (flèches, cible souris) sont dans le repère du vaisseau, qui est
     celui de l'écran ; la vitesse renvoyée est tournée de l'orientation du
     vaisseau (`_get_ship_rotation`), car `move_and_slide` agit dans le repère du monde.
-- **Joueur qui arrive** : `Network._on_peer_connected` lui envoie l'état du vaisseau,
+- **Joueur qui arrive** : `Network._on_peer_connected` lui envoie les personnages
+  existants (avant le sien), puis l'état des vaisseaux,
   l'état des modules, leurs commandes (`Ship.send_module_controls`), les portes et
   les personnages. Toute nouvelle donnée
   synchronisée doit y être ajoutée.

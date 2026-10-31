@@ -1,18 +1,19 @@
 class_name Fleet
 extends Node2D
-## Vaisseaux autres que celui des joueurs, créés et retirés en cours de partie
-## par l'hôte (spawn_ship, remove_ship). Le MultiplayerSpawner enfant les
-## recrée chez tous les joueurs, y compris ceux qui arrivent plus tard ; leur
-## mouvement et leurs modules sont ensuite synchronisés comme ceux du vaisseau
-## des joueurs (groupe Ship.GROUP, voir Network).
+## Tous les vaisseaux de la partie sont ses enfants : celui de départ des
+## joueurs (« Ship », dans la scène) et ceux créés et retirés en cours de
+## partie par l'hôte (spawn_ship, remove_ship). Le MultiplayerSpawner enfant
+## recrée ces derniers chez tous les joueurs, y compris ceux qui arrivent plus
+## tard ; leur mouvement et leurs modules sont ensuite synchronisés comme
+## ceux de tous les vaisseaux (groupe Ship.GROUP, voir Network).
 ##
 ## Un vaisseau est décrit par un dictionnaire (voir spawn_ship), seul envoyé
 ## sur le réseau : le nœud est construit par _create_ship sur chaque machine.
 ##
-## Ce nœud est le repère de l'espace : ses enfants y ont leurs coordonnées,
-## comme Ship.space_position du vaisseau ancré (celui des joueurs, immobile
-## dans la scène, voir Ship.anchored). Il est donc placé à chaque image à
-## l'inverse de la place de ce vaisseau dans l'espace, interpolée comme le
+## Ce nœud est le repère de l'espace : ses enfants y ont leurs coordonnées.
+## Le vaisseau ancré (celui du joueur local, voir Ship.anchored) ignore ce
+## repère et reste fixe dans la scène : ce nœud est donc placé à chaque image
+## à l'inverse de la place de ce vaisseau dans l'espace, interpolée comme le
 ## reste de l'image (d'où l'interpolation physique coupée sur ce nœud).
 
 ## Script de chaque type de module, pour construire un vaisseau à partir de
@@ -106,10 +107,14 @@ func spawn_ship(data: Dictionary) -> Ship:
 	return _spawner.spawn(description) as Ship
 
 
-## Retire un vaisseau chez tous les joueurs (hôte uniquement).
-func remove_ship(ship: Ship) -> void:
-	if ship.get_parent() == self:
-		ship.queue_free()
+## Retire un vaisseau créé par spawn_ship chez tous les joueurs (hôte
+## uniquement). Refusé (faux) s'il a un équipage : les personnages à bord
+## disparaîtraient (les faire d'abord changer de vaisseau).
+func remove_ship(ship: Ship) -> bool:
+	if ship.get_parent() != self or ship.get_node("Crew").get_child_count() > 0:
+		return false
+	ship.queue_free()
+	return true
 
 
 ## Construit le vaisseau décrit par [param data] (sur chaque machine, appelé

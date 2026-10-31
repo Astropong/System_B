@@ -48,8 +48,6 @@ const SLIDER_GRABBER_BORDER := Color(0.3, 0.32, 0.38)
 const SLIDER_MARK_LENGTH := 12.0
 const SLIDER_MARK_FONT_SIZE := 14
 
-@export var ship: Ship
-
 var _module: Module
 var _panel: PanelContainer
 var _title: Label
@@ -147,15 +145,14 @@ func close() -> void:
 	_panel.hide()
 
 
-## Module dont la zone d'interaction contient le personnage local, ou null.
+## Module dont la zone d'interaction contient le personnage local, ou null
+## (modules du vaisseau où il se trouve).
 func _get_module_in_reach() -> Module:
-	if ship == null or multiplayer.multiplayer_peer == null:
-		return null
-	var player := ship.get_node_or_null("Crew/%d" % multiplayer.get_unique_id()) as Node2D
+	var player := Player.get_local()
 	if player == null:
 		return null
 	# Joueurs et modules sont tous dans le repère du vaisseau.
-	for module in ship.get_modules():
+	for module in player.get_ship().get_modules():
 		if module.get_interaction_rect().has_point(player.position - module.position):
 			return module
 	return null
