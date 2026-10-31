@@ -8,8 +8,8 @@ extends Control
 ## (selon Module.can_be_switched_off et Module.adjustable_power), décidés par
 ## l'hôte (Module.request_switch, Module.request_target_power).
 ## Au centre : les éléments propres au module (Module.build_interface).
-## Sur le côté : ses statistiques (état, consommation, températures), mises à
-## jour en continu. Tant que la fenêtre est ouverte, le personnage ne se
+## Sur le côté : ses statistiques (état, consommation, températures, oxygène),
+## mises à jour en continu. Tant que la fenêtre est ouverte, le personnage ne se
 ## déplace pas (voir Player._read_input).
 ## Une indication s'affiche en bas de l'écran quand le joueur est dans une zone.
 
@@ -20,8 +20,14 @@ const WINDOW_SIZE := Vector2(760, 420)
 const STATS_WIDTH := 240.0
 const TITLE_FONT_SIZE := 26
 const STAT_FONT_SIZE := 18
-const INTACT_COLOR := Color(0.4, 0.95, 0.5)
-const BROKEN_COLOR := Color(1.0, 0.35, 0.3)
+## Couleur du texte de chaque état du module.
+const CONDITION_COLORS := {
+	Module.Condition.INTACT: Color(0.4, 0.95, 0.5),
+	Module.Condition.FUNCTIONAL: Color(0.75, 0.95, 0.4),
+	Module.Condition.DAMAGED: Color(1.0, 0.75, 0.3),
+	Module.Condition.BROKEN: Color(1.0, 0.35, 0.3),
+	Module.Condition.OUT_OF_SERVICE: Color(0.55, 0.55, 0.6),
+}
 const PROMPT_TEXT := "Espace / clic droit : utiliser %s"
 const PANEL_COLOR := Color(0.09, 0.1, 0.13, 0.96)
 const PANEL_BORDER_COLOR := Color(0.55, 0.58, 0.65)
@@ -56,6 +62,7 @@ var _state_label: Label
 var _power_label: Label
 var _machine_label: Label
 var _room_label: Label
+var _oxygen_label: Label
 var _prompt: Label
 var _controls: VBoxContainer
 var _controls_separator: VSeparator
@@ -159,12 +166,13 @@ func _get_module_in_reach() -> Module:
 
 
 func _update_stats() -> void:
-	var intact := _module.is_intact()
-	_state_label.text = "Intact" if intact else "Cassé"
-	_state_label.add_theme_color_override("font_color", INTACT_COLOR if intact else BROKEN_COLOR)
+	var condition := _module.get_condition()
+	_state_label.text = Module.CONDITION_NAMES[condition]
+	_state_label.add_theme_color_override("font_color", CONDITION_COLORS[condition])
 	_power_label.text = "%d W / %d W" % [roundi(_module.power_supplied), roundi(_module.get_ideal_power())]
 	_machine_label.text = "%d °C" % roundi(_module.machine_temperature)
 	_room_label.text = "%d °C" % roundi(_module.room_temperature)
+	_oxygen_label.text = "%d %%" % roundi(_module.oxygen * 100.0)
 
 
 ## Levier et curseur suivent l'état décidé par l'hôte, sauf le curseur tant
@@ -172,6 +180,7 @@ func _update_stats() -> void:
 ## SLIDER_SEND_INTERVAL s, et une dernière fois au relâchement.
 func _update_controls(delta: float) -> void:
 	_lever.queue_redraw()
+	_lever.modulate.a = 0.4 if _module.is_out_of_service() else 1.0
 	_lever_label.text = tr("Marche") if _module.is_on else tr("Arrêt")
 	if _slider_dragging:
 		_time_since_send += delta
@@ -380,6 +389,7 @@ func _build() -> void:
 	_power_label = _add_stat(stats, "Consommation")
 	_machine_label = _add_stat(stats, "Température de la machine")
 	_room_label = _add_stat(stats, "Température de la pièce")
+	_oxygen_label = _add_stat(stats, "Oxygène")
 
 	# Indication en bas de l'écran.
 	_prompt = Label.new()

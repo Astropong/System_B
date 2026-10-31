@@ -91,8 +91,39 @@ const LAMP_RADIUS := 6.0
 ## Zone d'interaction (voir get_interaction_rect) : taille en cases et couleur.
 const INTERACTION_SIZE := Vector2(2, 2)
 const INTERACTION_COLOR := Color(1, 1, 1, 0.35)
-## Au-dessus de cet état, le module est intact ; sinon il est cassé.
-const BROKEN_THRESHOLD := 0.5
+## États d'usure d'un module (voir get_condition) : intact à 100 %, hors service à
+## 0 %. Fonctionnel au-dessus de CONDITION_FUNCTIONAL_MIN, abîmé au-dessus de
+## CONDITION_DAMAGED_MIN, cassé en dessous.
+enum Condition { INTACT, FUNCTIONAL, DAMAGED, BROKEN, OUT_OF_SERVICE }
+const CONDITION_FUNCTIONAL_MIN := 0.6
+const CONDITION_DAMAGED_MIN := 0.3
+## Texte de chaque état (clés de traduction).
+const CONDITION_NAMES := {
+	Condition.INTACT: "Intact",
+	Condition.FUNCTIONAL: "Fonctionnel",
+	Condition.DAMAGED: "Abîmé",
+	Condition.BROKEN: "Cassé",
+	Condition.OUT_OF_SERVICE: "Hors service",
+}
+
+## Fissures (voir _build_cracks), qui apparaissent et s'allongent quand l'état
+## baisse. Nombre de fissures principales ; perte d'état (0–1) à laquelle
+## apparaissent la première puis la dernière ; perte d'état qu'il faut à chacune
+## pour atteindre sa longueur complète (la dernière est complète à l'état 0).
+const CRACK_COUNT := 10
+const CRACK_FIRST_START := 0.0
+const CRACK_LAST_START := 0.8
+const CRACK_GROWTH := 0.2
+## Nombre de tronçons d'une fissure (min, max), longueur d'un tronçon (px),
+## écart d'angle maximal entre deux tronçons (radians) et probabilité qu'un
+## sommet donne une branche.
+const CRACK_SEGMENTS := Vector2i(7, 12)
+const CRACK_SEGMENT_LENGTH := Vector2(20.0, 48.0)
+const CRACK_BEND := 0.55
+const CRACK_BRANCH_CHANCE := 0.3
+const CRACK_COLOR := Color(0.02, 0.02, 0.04, 0.9)
+const CRACK_HIGHLIGHT_COLOR := Color(0.85, 0.88, 0.95, 0.25)
+const CRACK_WIDTH := 2.5
 
 ## Aménagement des salles (voir _draw_details) : meubles en aplat sombre
 ## cerclés de la couleur du type, emblème au sol en transparence.
@@ -140,10 +171,30 @@ const QUADRANT_SIZE := 3.0
 			queue_redraw()
 		machine_temperature = value
 
-## État du module : 1 = intact, 0 = détruit (voir is_intact).
+## État du module : 1 = intact, 0 = hors service (voir get_condition). À 0, le
+## module s'éteint et ne peut plus être rallumé tant que son état n'a pas
+## dépassé 0 : réglé de la même façon chez tous (l'état est envoyé à tous).
 @export_range(0.0, 1.0, 0.01) var state: float = 1.0:
 	set(value):
-		state = clampf(value, 0.0, 1.0)
+		value = clampf(value, 0.0, 1.0)
+		if value == state:
+			return
+		state = value
+		if state <= 0.0:
+			is_on = false
+			power_supplied = 0.0
+		if _cracks:
+			_cracks.queue_redraw()
+
+## Taux d'oxygène de la salle, de 0 à 1 (affiché en pourcentage). Évolue selon
+## OxygenRules (décidé par l'hôte, reçu 10 fois par seconde avec l'alimentation) ;
+## la salle n'est redessinée que si le pourcentage affiché change.
+@export_range(0.0, 1.0, 0.01) var oxygen: float = OxygenRules.START_LEVEL:
+	set(value):
+		value = clampf(value, 0.0, 1.0)
+		if roundi(value * 100.0) != roundi(oxygen * 100.0):
+			queue_redraw()
+		oxygen = value
 
 ## Vrai si le module peut être éteint (levier marche / arrêt de la fenêtre
 ## du module, voir ModuleWindow).
@@ -173,6 +224,10 @@ var _flicker_factor: float = 1.0
 var _heat_effect: Node2D
 var _heat_backbuffer: BackBufferCopy
 var _frost_effect: Node2D
+var _cracks: Node2D
+# Fissures : "points" (locaux), "start" (perte d'état où elle apparaît) et
+# "growth" (perte d'état qu'il lui faut pour atteindre sa longueur complète).
+var _crack_list: Array[Dictionary] = []
 
 ## Place du module dans le vaisseau : coin supérieur gauche, en cases.
 ## Le vaisseau en déduit la position, les murs, les portes et les voisins.
@@ -237,9 +292,28 @@ func get_size() -> Vector2i:
 
 # --- Méthodes communes -------------------------------------------------------
 
-## Vrai si l'état du module dépasse BROKEN_THRESHOLD.
-func is_intact() -> bool:
-	return state > BROKEN_THRESHOLD
+## Usure du module : intact à 100 %, hors service à 0 %, entre les deux
+## fonctionnel, abîmé ou cassé (seuils CONDITION_*).
+func get_condition() -> Condition:
+	if state >= 1.0:
+		return Condition.INTACT
+	if state <= 0.0:
+		return Condition.OUT_OF_SERVICE
+	if state > CONDITION_FUNCTIONAL_MIN:
+		return Condition.FUNCTIONAL
+	if state > CONDITION_DAMAGED_MIN:
+		return Condition.DAMAGED
+	return Condition.BROKEN
+
+
+## Vrai si l'état est à 0 : le module est éteint et ne se rallume pas.
+func is_out_of_service() -> bool:
+	return state <= 0.0
+
+
+## Vrai si le module est allumé et atteint son alimentation minimale.
+func is_operational() -> bool:
+	return is_on and power_supplied >= get_min_power()
 
 
 ## Zone d'interaction (px, coordonnées locales) : un joueur qui s'y trouve
@@ -297,6 +371,7 @@ func _ready() -> void:
 	_lamps.name = "Lamps"
 	_lamps.draw.connect(_draw_lamps)
 	add_child(_lamps)
+	_create_cracks()
 	_create_climate_effects()
 
 
@@ -334,6 +409,8 @@ func send_controls_to(peer_id: int) -> void:
 func _request_switch(on: bool) -> void:
 	if not multiplayer.is_server() or not can_be_switched_off or not _is_requester_aboard():
 		return
+	if on and is_out_of_service():
+		return
 	_apply_controls(on, target_power)
 	_receive_controls.rpc(is_on, target_power)
 
@@ -351,9 +428,10 @@ func _receive_controls(on: bool, watts: float) -> void:
 	_apply_controls(on, watts)
 
 
-## Éteint, le module ne consomme plus rien, immédiatement.
+## Éteint, le module ne consomme plus rien, immédiatement. Hors service, il
+## reste éteint.
 func _apply_controls(on: bool, watts: float) -> void:
-	is_on = on
+	is_on = on and not is_out_of_service()
 	if watts >= 0.0:
 		target_power = clampf(watts, get_min_power(), get_max_power())
 	if not is_on:
@@ -423,6 +501,95 @@ func _draw_lamps() -> void:
 		_lamps.draw_circle(corner, LAMP_RADIUS * 2.2, halo)
 		_lamps.draw_circle(corner, LAMP_RADIUS, _light_color)
 		_lamps.draw_arc(corner, LAMP_RADIUS, 0.0, TAU, 16, WALL_COLOR.darkened(0.3), 1.5)
+
+
+## Crée le calque des fissures, posé sur la salle (sous les effets de
+## température). Elles sont redessinées seulement quand l'état change.
+func _create_cracks() -> void:
+	_build_cracks()
+	_cracks = Node2D.new()
+	_cracks.name = "Cracks"
+	_cracks.draw.connect(_draw_cracks)
+	add_child(_cracks)
+	_cracks.queue_redraw()
+
+
+## Trace les fissures du module, les mêmes sur toutes les machines (graine
+## tirée du nom du vaisseau et du module) : des fissures principales, plus
+## nombreuses dans une grande salle, dont les sommets donnent parfois une
+## branche. Chacune apparaît à sa perte d'état (la première tout de suite, la
+## dernière vers 80 %) et s'allonge ensuite jusqu'à CRACK_GROWTH plus tard.
+func _build_cracks() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("%s/%s" % [get_parent().name, name])
+	var size := get_pixel_size()
+	var default_area := Vector2(DEFAULT_SIZE).x * Vector2(DEFAULT_SIZE).y * CELL_SIZE * CELL_SIZE
+	var count := maxi(roundi(CRACK_COUNT * size.x * size.y / default_area), 1)
+	for i in count:
+		var start := lerpf(CRACK_FIRST_START, CRACK_LAST_START, float(i) / maxf(count - 1, 1.0))
+		var origin := Vector2(rng.randf_range(0.05, 0.95) * size.x, rng.randf_range(0.05, 0.95) * size.y)
+		_add_crack(rng, origin, (size / 2.0 - origin).angle() + rng.randf_range(-1.2, 1.2), start, CRACK_GROWTH,
+				rng.randi_range(CRACK_SEGMENTS.x, CRACK_SEGMENTS.y), true)
+
+
+## Ajoute une fissure partant de [param origin] dans la direction [param angle] ;
+## elle s'arrête au bord de la salle. Une branche (sans sous-branche) apparaît
+## quand la fissure atteint son sommet.
+func _add_crack(rng: RandomNumberGenerator, origin: Vector2, angle: float, start: float,
+		growth: float, segments: int, with_branches: bool) -> void:
+	var size := get_pixel_size()
+	var points := PackedVector2Array([origin])
+	var branches: Array[Array] = []
+	for s in segments:
+		angle += rng.randf_range(-CRACK_BEND, CRACK_BEND)
+		var point := points[points.size() - 1] \
+				+ Vector2.from_angle(angle) * rng.randf_range(CRACK_SEGMENT_LENGTH.x, CRACK_SEGMENT_LENGTH.y)
+		points.append(point.clamp(Vector2.ZERO, size))
+		if not Rect2(Vector2.ZERO, size).has_point(point):
+			break
+		if with_branches and rng.randf() < CRACK_BRANCH_CHANCE:
+			branches.append([points.size() - 1, angle + rng.randf_range(0.5, 1.0) * (1.0 if rng.randf() < 0.5 else -1.0)])
+	_crack_list.append({"points": points, "start": start, "growth": growth})
+	for branch in branches:
+		var branch_start := start + growth * float(branch[0]) / maxf(points.size() - 1, 1.0)
+		_add_crack(rng, points[branch[0]], branch[1], branch_start,
+				minf(growth, 1.0 - branch_start), rng.randi_range(3, 6), false)
+
+
+## Dessine chaque fissure sur la part de sa longueur atteinte à l'état actuel :
+## trait sombre, avec un léger reflet décalé.
+func _draw_cracks() -> void:
+	var loss := 1.0 - state
+	var paths: Array[PackedVector2Array] = []
+	for crack: Dictionary in _crack_list:
+		var progress := clampf((loss - crack["start"]) / maxf(crack["growth"], 0.001), 0.0, 1.0)
+		if progress > 0.0:
+			paths.append(_partial_path(crack["points"], progress))
+	_cracks.draw_set_transform(Vector2(1.5, 1.5))
+	for path in paths:
+		_cracks.draw_polyline(path, CRACK_HIGHLIGHT_COLOR, 1.0)
+	_cracks.draw_set_transform(Vector2.ZERO)
+	for path in paths:
+		_cracks.draw_polyline(path, CRACK_COLOR, CRACK_WIDTH)
+
+
+## Début de [param points] sur la fraction [param progress] (0–1) de sa longueur.
+static func _partial_path(points: PackedVector2Array, progress: float) -> PackedVector2Array:
+	if progress >= 1.0:
+		return points
+	var total := 0.0
+	for i in range(1, points.size()):
+		total += points[i - 1].distance_to(points[i])
+	var remaining := total * progress
+	var result := PackedVector2Array([points[0]])
+	for i in range(1, points.size()):
+		var length := points[i - 1].distance_to(points[i])
+		if length > remaining:
+			result.append(points[i - 1].lerp(points[i], remaining / length))
+			break
+		result.append(points[i])
+		remaining -= length
+	return result
 
 
 ## Crée les calques des effets de chaleur et de gel, posés sur la salle
@@ -577,6 +744,8 @@ func _draw_battery() -> void:
 			HORIZONTAL_ALIGNMENT_CENTER, text_w, 16, TEXT_COLOR)
 	draw_string(font, Vector2(text_x, rect.end.y + 78), tr("mach. %d °C") % roundi(machine_temperature),
 			HORIZONTAL_ALIGNMENT_CENTER, text_w, 13, TEXT_COLOR.darkened(0.3))
+	draw_string(font, Vector2(text_x, rect.end.y + 98), tr("oxygène %d %%") % roundi(oxygen * 100.0),
+			HORIZONTAL_ALIGNMENT_CENTER, text_w, 16, TEXT_COLOR)
 
 
 ## Aménagement propre à chaque type (facultatif à surcharger), dessiné à

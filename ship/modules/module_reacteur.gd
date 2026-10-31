@@ -12,7 +12,7 @@ extends Module
 
 const ACCENT := Color(1.0, 0.5, 0.15)
 ## Poussée à l'alimentation optimale (N).
-const MAX_THRUST := 1000000.0
+const MAX_THRUST := 500000.0
 ## Tuyère dessinée hors du mur : longueur et largeurs (cases).
 const NOZZLE_LENGTH := 1.5
 const NOZZLE_INNER_WIDTH := 4.0
@@ -75,11 +75,6 @@ func _process(delta: float) -> void:
 	super._process(delta)
 	if _flame and _flame.visible:
 		_flame.queue_redraw()
-
-
-## Vrai si le réacteur est allumé et atteint son alimentation minimale.
-func is_operational() -> bool:
-	return is_on and power_supplied >= get_min_power()
 
 
 ## Poussée actuelle (N) : proportionnelle à l'alimentation, nulle s'il n'est

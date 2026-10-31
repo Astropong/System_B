@@ -116,8 +116,21 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   sous `FLAME_MIN_LEVEL` (triangle trop plat, erreur de triangulation).
 - **Valeurs d'instance** : `power_supplied` (W), `room_temperature` et
   `machine_temperature` (°C, réels, affichés arrondis), `state` (0–1),
-  `grid_position` (cases, réglée dans la scène). `doorways` et `neighbors` sont
+  `oxygen` (0–1, affiché en pourcentage), `grid_position` (cases, réglée dans la scène). `doorways` et `neighbors` sont
   calculés par le vaisseau.
+- **État d'usure** (`Module.state`, `get_condition`) : 5 libellés (`CONDITION_NAMES`) —
+  Intact (100 %), Fonctionnel (au-dessus de `CONDITION_FUNCTIONAL_MIN`), Abîmé
+  (au-dessus de `CONDITION_DAMAGED_MIN`), Cassé, Hors service (0 %). **À 0**,
+  le setter de `state` éteint le module (`is_on` faux, 0 W), chez tous (l'état
+  est envoyé à tous) ; `is_out_of_service()` refuse alors tout rallumage (hôte :
+  `_request_switch`, et `_apply_controls`), jusqu'à ce que l'état redépasse 0
+  (le module reste éteint tant qu'on ne le rallume pas). `Module.is_operational()`
+  (allumé et à son alimentation minimale) sert aux règles et au réacteur.
+- **Fissures** (nœud enfant `Cracks`, `_build_cracks` / `_draw_cracks`) : exemple
+  d'affichage de l'usure. Tracés fixes tirés d'une graine (nom du vaisseau et du
+  module : les mêmes partout), qui apparaissent à une perte d'état croissante
+  et s'allongent ensuite (`CRACK_*`) ; redessinés seulement quand `state`
+  change.
 - **Commandes** (affichées dans la fenêtre du module, voir Fenêtre de module) :
   `@export` `can_be_switched_off` (levier marche / arrêt, vrai par défaut) et
   `adjustable_power` (curseur d'alimentation cible, vrai par défaut, mis à faux
@@ -269,7 +282,7 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   - après un saut (correction d'un coup), appeler `reset_physics_interpolation()` ;
   - ne pas replier les angles (un saut de 360° serait interpolé) ;
   - caméra en mode physique (`process_callback`), sans lissage de position.
-- L'hôte applique alimentation puis température `PowerRules.UPDATE_RATE` fois par
+- L'hôte applique alimentation, température puis oxygène `PowerRules.UPDATE_RATE` fois par
   seconde, et envoie tout en un RPC (`_receive_power_and_temperatures`, non fiable ordonné).
 
 ### Alimentation — `ship/rules/power_rules.gd`
@@ -289,6 +302,17 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - N'a pour l'instant qu'un effet visuel. À 150 W (cible maximale), la machine
   plafonne à 75 °C et la pièce à 35 °C : ni chaleur (`HEAT_THRESHOLD`) ni givre
   (`FROST_THRESHOLD`) ne se déclenchent actuellement.
+
+### Oxygène — `ship/rules/oxygen_rules.gd`
+- `Module.oxygen` (0–1), `OxygenRules.START_LEVEL` (50 %) pour tous au départ.
+  Appliqué par l'hôte au même pas que l'alimentation et la température, envoyé
+  avec elles (`_receive_power_and_temperatures`).
+- Un générateur d'oxygène opérationnel remplit sa salle (`PRODUCTION_SPEED` ×
+  alimentation / optimum par seconde). Les autres modules montent vers le taux du
+  meilleur voisin (relié par une porte) qui a au moins `SOURCE_MIN_LEVEL`, sans
+  le dépasser, à `SPREAD_SPEED` × (somme des alimentations / optimum des
+  générateurs d'oxygène opérationnels du vaisseau) : sans générateur, rien ne
+  se propage. Rien ne consomme l'oxygène pour l'instant.
 
 ### Mode pilotage — `ship/piloting.gd`, `ship/modules/steering_wheel.gd`
 - Fenêtre du Pilotage (`ModulePilotage.build_interface`) : volant cliquable
@@ -414,8 +438,10 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   Pendant un glissement, la cible part toutes les
   `SLIDER_SEND_INTERVAL` s, puis au relâchement.
 - Centre : `Module.build_interface` (bouton d'exemple par défaut) ; pour des
-  éléments propres à un type, la redéfinir dans son `module_*.gd`. Côté : état (« Intact » si `state` > `BROKEN_THRESHOLD`, sinon « Cassé »),
-  consommation, températures de la machine et de la pièce.
+  éléments propres à un type, la redéfinir dans son `module_*.gd`. Côté : état
+  (un des 5 libellés, couleur par état : `CONDITION_COLORS`), consommation,
+  températures de la machine et de la pièce, oxygène. Levier atténué si le
+  module est hors service.
 - `ModuleWindow.is_open` immobilise le personnage local ; statique, remis à faux
   dans `_exit_tree` (scène rechargée quand l'hôte part). Les boutons de la
   fenêtre ne prennent pas le focus (Espace sert à fermer).
@@ -435,8 +461,8 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   jusqu'à `MAX_SPEED_KMH` × 2 de vitesse relative, deux vaisseaux peuvent
   s'enfoncer trop ou se traverser (pas de détection continue).
 - Pas de calcul d'itinéraire : viser hors de l'axe d'une porte fait buter contre le mur.
-- Pannes des modules à définir (`get_possible_failures`) ; `state` seulement affiché
-  (valeurs aléatoires de test).
+- Pannes des modules à définir (`get_possible_failures`) ; `state` ne baisse que par les
+  chocs (valeurs aléatoires de test au départ) ; la réparation reste à faire.
 - Surchauffe et surtension à venir : le curseur permet de dépasser l'optimum
   (éclairage orangé), sans autre conséquence pour l'instant.
 - Le mobilier est seulement dessiné : il ne bloque pas les déplacements.

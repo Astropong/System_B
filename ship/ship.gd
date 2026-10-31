@@ -21,7 +21,8 @@ extends Node2D
 ## Tous les joueurs voient ainsi le vaisseau sous la même orientation.
 ## L'hôte applique aussi les règles d'alimentation (voir power_rules.gd)
 ## PowerRules.UPDATE_RATE fois par seconde, puis les règles de température
-## (voir temperature_rules.gd), et envoie le résultat aux autres.
+## (voir temperature_rules.gd) et d'oxygène (voir oxygen_rules.gd), et envoie
+## le résultat aux autres.
 
 ## Intervalle (s) entre deux corrections de position envoyées par l'hôte.
 const MOTION_SYNC_INTERVAL := 1.0
@@ -662,7 +663,7 @@ func _apply_correction(delta: float) -> void:
 		_rotation_error -= turn
 
 
-## Alimentation puis température des modules : mise à jour à intervalle fixe
+## Alimentation, température puis oxygène des modules : mise à jour à intervalle fixe
 ## (hôte uniquement), résultat envoyé aux autres en un seul message.
 func _update_module_rules(delta: float) -> void:
 	var step := 1.0 / PowerRules.UPDATE_RATE
@@ -674,21 +675,24 @@ func _update_module_rules(delta: float) -> void:
 		_rules_timer -= step
 		PowerRules.update(modules, step)
 		TemperatureRules.update(modules, step)
+		OxygenRules.update(modules, step)
 
 	# Un seul petit message pour tous les modules.
 	var power := PackedFloat32Array()
 	var room_temperatures := PackedFloat32Array()
 	var machine_temperatures := PackedFloat32Array()
+	var oxygen := PackedFloat32Array()
 	for m in modules:
 		power.append(m.power_supplied)
 		room_temperatures.append(m.room_temperature)
 		machine_temperatures.append(m.machine_temperature)
-	_receive_power_and_temperatures.rpc(power, room_temperatures, machine_temperatures)
+		oxygen.append(m.oxygen)
+	_receive_power_and_temperatures.rpc(power, room_temperatures, machine_temperatures, oxygen)
 
 
 @rpc("authority", "call_remote", "unreliable_ordered")
 func _receive_power_and_temperatures(power: PackedFloat32Array, room_temperatures: PackedFloat32Array,
-		machine_temperatures: PackedFloat32Array) -> void:
+		machine_temperatures: PackedFloat32Array, oxygen: PackedFloat32Array) -> void:
 	var modules := get_modules()
 	for i in mini(power.size(), modules.size()):
 		modules[i].power_supplied = power[i]
@@ -696,6 +700,8 @@ func _receive_power_and_temperatures(power: PackedFloat32Array, room_temperature
 		modules[i].room_temperature = room_temperatures[i]
 	for i in mini(machine_temperatures.size(), modules.size()):
 		modules[i].machine_temperature = machine_temperatures[i]
+	for i in mini(oxygen.size(), modules.size()):
+		modules[i].oxygen = oxygen[i]
 
 
 ## TEST : tire au hasard l'état de chaque module (hôte, à la création de la
