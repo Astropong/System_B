@@ -6,9 +6,12 @@ extends Control
 ## En TRANSITION_TIME secondes, la caméra du joueur s'éloigne (zoom divisé par
 ## ZOOM_FACTOR), vise LOOK_AHEAD cases devant le centre du vaisseau et cesse
 ## de tourner avec lui :
-## l'espace reste fixe à l'écran, c'est le vaisseau qui tourne. La souris
+## l'espace reste fixe à l'écran, c'est le vaisseau qui tourne. Pendant tout le
+## mode (transitions comprises), les vaisseaux sont montrés en vue « coque »
+## (Ship.hull_view : silhouettes blanches au lieu des salles). La souris
 ## commande alors le vaisseau (pas le clavier) ; le personnage reste immobile.
 ## Le clic droit quitte le mode (même transition en sens inverse).
+## Statistiques du vaisseau à gauche de l'écran (pour l'instant : vitesse en km/h).
 ##
 ## Commandes (envoyées à l'hôte par Ship.request_controls, qui fait autorité) :
 ## bouton gauche maintenu : direction du centre de l'écran vers la souris
@@ -33,8 +36,14 @@ const TRANSITION_TIME := 0.5
 ## l'écart à cette vitesse est rattrapé en TURN_RESPONSE secondes.
 const BRAKING_MARGIN := 0.8
 const TURN_RESPONSE := 0.5
-## La commande de rotation est arrondie à TURN_STEP près (moins d'envois).
-const TURN_STEP := 0.1
+## La commande de rotation est arrondie (moins d'envois) en précision
+## relative : TURN_STEPS_PER_DOUBLING valeurs possibles chaque fois qu'elle
+## double (≈ 19 % d'écart au plus entre deux). Un pas fixe la mettrait à zéro
+## quand les réacteurs sont puissants (petite commande = forte accélération),
+## et le vaisseau ne pourrait plus arrêter une rotation lente. En dessous de
+## TURN_MIN_COMMAND, pas de commande.
+const TURN_STEPS_PER_DOUBLING := 4.0
+const TURN_MIN_COMMAND := 0.00001
 ## Intervalle minimal (s) entre deux demandes de commandes.
 const SEND_INTERVAL := 0.1
 ## Distance (px d'écran) au centre de l'écran en dessous de laquelle la souris
@@ -51,6 +60,10 @@ const LOOK_AHEAD := 0.0
 const HINT_TEXT := "Pilotage : clic gauche maintenu pour diriger le vaisseau vers la souris   |   clic droit : quitter"
 const UNPOWERED_TEXT := "Pilotage hors service : alimentation insuffisante   |   clic droit : quitter"
 const UNPOWERED_COLOR := Color(1.0, 0.35, 0.3)
+## Statistiques du vaisseau, à gauche de l'écran pendant le pilotage : marge
+## au bord (px) et textes (valeurs insérées après traduction).
+const STATS_MARGIN := 24.0
+const SPEED_TEXT := "Vitesse : %d km/h"
 
 enum State { OFF, ENTERING, ACTIVE, LEAVING }
 
@@ -74,6 +87,8 @@ var _sent_turn: float = 0.0
 var _sent_valid: bool = false
 var _time_since_send: float = 0.0
 var _hint: Label
+var _stats: VBoxContainer
+var _speed_label: Label
 ## Vrai pendant que le bouton gauche dirige le vaisseau (trait affiché).
 var _aiming: bool = false
 
@@ -97,6 +112,7 @@ func _enter_tree() -> void:
 func _exit_tree() -> void:
 	if _instance == self:
 		_instance = null
+	Ship.hull_view = false
 
 
 func _ready() -> void:
@@ -112,6 +128,36 @@ func _ready() -> void:
 	_hint.add_theme_font_size_override("font_size", ModuleWindow.STAT_FONT_SIZE)
 	_hint.hide()
 	add_child(_hint)
+	_create_stats()
+
+
+## Colonne de statistiques, centrée verticalement à gauche de l'écran. Les
+## textes sont composés (valeur insérée) : traduits par _update_stats.
+func _create_stats() -> void:
+	_stats = VBoxContainer.new()
+	_stats.set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT)
+	_stats.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_stats.offset_left = STATS_MARGIN
+	_stats.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stats.hide()
+	add_child(_stats)
+	_speed_label = Label.new()
+	_speed_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	_speed_label.add_theme_font_size_override("font_size", ModuleWindow.STAT_FONT_SIZE)
+	_stats.add_child(_speed_label)
+
+
+## Vitesse du vaisseau (centre de masse) en km/h : 1 m = PIXELS_PER_METER px.
+func _update_stats() -> void:
+	var kmh := ship.velocity.length() / Ship.PIXELS_PER_METER * 3.6
+	_speed_label.text = tr(SPEED_TEXT) % roundi(kmh)
+
+
+func _process(_delta: float) -> void:
+	var shown := _state == State.ENTERING or _state == State.ACTIVE
+	_stats.visible = shown
+	if shown:
+		_update_stats()
 
 
 func _enter() -> void:
@@ -122,12 +168,13 @@ func _enter() -> void:
 		return
 	_camera = player.get_node("Camera2D")
 	_base_zoom = _camera.zoom
-	_turns = roundf(ship.rotation / TAU) * TAU
+	_turns = roundf(ship.space_rotation / TAU) * TAU
 	_mouse_armed = false
 	_sent_valid = false
 	_time_since_send = SEND_INTERVAL
 	_state = State.ENTERING
 	_hint.show()
+	Ship.hull_view = true
 
 
 func _leave() -> void:
@@ -135,7 +182,7 @@ func _leave() -> void:
 	_hint.hide()
 	queue_redraw()  # efface le trait
 	# Les tours faits pendant le pilotage ne sont pas à refaire en sens inverse.
-	var turns := roundf(ship.rotation / TAU) * TAU
+	var turns := roundf(ship.space_rotation / TAU) * TAU
 	if turns != _turns:
 		_turns = turns
 		_apply_camera()
@@ -160,6 +207,7 @@ func _physics_process(delta: float) -> void:
 	if not is_instance_valid(_camera):
 		_state = State.OFF
 		_hint.hide()
+		Ship.hull_view = false
 		return
 	match _state:
 		State.ENTERING:
@@ -173,6 +221,7 @@ func _physics_process(delta: float) -> void:
 	_apply_camera()
 	if _state == State.LEAVING and _progress <= 0.0:
 		_state = State.OFF
+		Ship.hull_view = false
 
 
 ## Caméra entre la vue du joueur (progress 0) et celle du pilotage (1). Elle
@@ -180,12 +229,13 @@ func _physics_process(delta: float) -> void:
 ## viser devant le vaisseau et annuler sa rotation, on la décale de
 ## -position du personnage (le centre du vaisseau est son origine) plus
 ## LOOK_AHEAD cases vers l'avant (sa droite), et on la tourne de
-## -orientation du vaisseau.
+## -orientation du vaisseau dans l'espace (l'espace, placé par Fleet autour
+## du vaisseau ancré, tourne d'autant dans la scène : il reste fixe à l'écran).
 func _apply_camera() -> void:
 	var weight := smoothstep(0.0, 1.0, _progress)
 	var player := _camera.get_parent() as Node2D
 	_camera.position = (Vector2(LOOK_AHEAD * Module.CELL_SIZE, 0.0) - player.position) * weight
-	_camera.rotation = -(ship.rotation - _turns) * weight
+	_camera.rotation = -(ship.space_rotation - _turns) * weight
 	_camera.zoom = _base_zoom.lerp(_base_zoom / ZOOM_FACTOR, weight)
 
 
@@ -213,10 +263,13 @@ func _steer(delta: float) -> void:
 		var to_mouse := get_viewport().get_mouse_position() - get_viewport_rect().size / 2.0
 		if to_mouse.length() > MOUSE_DEAD_ZONE:
 			_aiming = true
-			# Direction de l'écran ramenée dans le monde, arrondie (moins d'envois).
-			var angle := snappedf(to_mouse.rotated(_camera.global_rotation).angle(), deg_to_rad(THRUST_ANGLE_STEP))
+			# Direction de l'écran ramenée dans la scène (rotation de la caméra),
+			# puis dans l'espace (orientation du vaisseau dans l'espace moins
+			# celle de son nœud, nulle s'il est ancré), arrondie (moins d'envois).
+			var to_space := _camera.global_rotation - ship.global_rotation + ship.space_rotation
+			var angle := snappedf(to_mouse.rotated(to_space).angle(), deg_to_rad(THRUST_ANGLE_STEP))
 			thrust = Vector2.from_angle(angle)
-			target_error = rad_to_deg(angle_difference(ship.rotation, angle))
+			target_error = rad_to_deg(angle_difference(ship.space_rotation, angle))
 	var turn := _turn_command(target_error)
 	queue_redraw()
 
@@ -249,7 +302,11 @@ func _turn_command(error: float) -> float:
 	if acceleration <= 0.0:
 		return 0.0
 	var command := gap / (acceleration * TURN_RESPONSE)
-	return snappedf(clampf(command, -1.0, 1.0), TURN_STEP)
+	command = clampf(command, -1.0, 1.0)
+	if absf(command) < TURN_MIN_COMMAND:
+		return 0.0
+	var doublings := roundf(log(absf(command)) / log(2.0) * TURN_STEPS_PER_DOUBLING) / TURN_STEPS_PER_DOUBLING
+	return signf(command) * minf(pow(2.0, doublings), 1.0)
 
 
 ## Indication des commandes, ou avertissement si le pilotage n'est pas alimenté.

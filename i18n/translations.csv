@@ -38,3 +38,4 @@ keys,fr,en
 "Prendre les commandes","Prendre les commandes","Take the helm"
 "Pilotage hors service : alimentation insuffisante   |   clic droit : quitter","Pilotage hors service : alimentation insuffisante   |   clic droit : quitter","Helm offline: insufficient power   |   right click: exit"
 "Pilotage : clic gauche maintenu pour diriger le vaisseau vers la souris   |   clic droit : quitter","Pilotage : clic gauche maintenu pour diriger le vaisseau vers la souris   |   clic droit : quitter","Piloting: hold left click to steer the ship toward the mouse   |   right click: exit"
+"Vitesse : %d km/h","Vitesse : %d km/h","Speed: %d km/h"

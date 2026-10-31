@@ -73,7 +73,7 @@ Dépôt : https://github.com/Astropong/System_B (branche `main`).
 
 Fichiers rangés **par fonctionnalité** (scène, script et shaders ensemble) :
 - `core/` : réseau, langue, mode debug, plein écran ;
-- `ship/` : vaisseau, portes, mode pilotage, `rules/` (alimentation,
+- `ship/` : vaisseau, autres vaisseaux (`fleet.gd`), collisions, portes, mode pilotage, `rules/` (alimentation,
   température), `modules/` (avec le volant du Pilotage) et leurs `shaders/` ;
 - `player/` ; `world/` (fond étoilé, brouillard) ; `ui/` (interface) ;
   `i18n/` (traductions) ; `assets/` pour les futures ressources.
@@ -98,7 +98,7 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   `DEFAULT_MASS` (1 t).
 - **Réacteur** (`module_reacteur.gd`) : tuyère sur le côté `nozzle_side` (réglé
   par instance, dessinée hors du mur), poussée en sens opposé, `MAX_THRUST`
-  (20 kN) × alimentation / optimum s'il est opérationnel (allumé, au-dessus du
+  × alimentation / optimum s'il est opérationnel (allumé, au-dessus du
   minimum ; l'état cassé n'est pas pris en compte). Flamme au bout de la tuyère
   (nœud enfant `Flame`, vacillante) de longueur `FLAME_LENGTH` × `flame_level`,
   réglé à chaque pas par `Ship._apply_forces` (part de poussée fournie), rien
@@ -147,12 +147,32 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   à celle de droite, `ReacteurBasAvant` dans son coin bas) : une paire du même
   côté pousse sans tourner, une paire en diagonale tourne sans pousser. Pas de
   réacteur à l'avant.
+- **Autres vaisseaux** (`ship/fleet.gd`, nœud `Ships`) : créés et retirés à la
+  volée par l'hôte (`Fleet.spawn_ship(description)`, `Fleet.remove_ship`),
+  recréés chez tous (y compris les joueurs qui arrivent) par le
+  `MultiplayerSpawner` `Ships/ShipSpawner`. Description : position, modules
+  ([type `Module.ModuleType`, place, propriétés parmi `MODULE_PROPERTIES`]),
+  rotation et vitesses facultatives ; seul ce dictionnaire passe sur le réseau.
+  `Ships` est le repère de l'espace (voir Vaisseau ancré) : positions en espace.
+  Au départ, `STARTING_SHIPS` (5 vaisseaux immobiles de 4 modules) autour du
+  nôtre. Le vaisseau des joueurs reste dans `main.tscn` (nœud `Ship`). Tous
+  sont dans le groupe `Ship.GROUP` : `Network` les synchronise tous (joueur
+  qui arrive, états aléatoires, départ d'un pilote). Après un `spawn_ship`,
+  envoyer l'état des modules (`send_module_states`).
+- **Collisions entre vaisseaux** (`ship/ship_collisions.gd`, nœud
+  `ShipCollisions`, hôte seul, après le déplacement des vaisseaux) : modules =
+  rectangles orientés, paire la plus enfoncée (axes séparateurs), impulsion de
+  corps rigides (`RESTITUTION`, masse et inertie de chaque vaisseau),
+  écartement selon la masse. Les deux modules touchés perdent
+  `DAMAGE_PER_SPEED` × vitesse d'impact (m/s) d'état, au-delà de
+  `MIN_DAMAGE_SPEED`. Envoi fiable du mouvement (`Ship.send_motion`) et des
+  états après un choc ; les autres machines voient un court chevauchement.
 - Deux modules qui partagent au moins `MIN_SHARED_WALL` cases de mur sont voisins,
   avec une porte au milieu de la partie commune (verticale ou pivotée de 90°).
 - Le nœud `Structure` (généré, non sauvegardé) contient les collisions des murs, les
   `LightOccluder2D` (murs fusionnés par droite : `_merge_wall_lines`) et les `Door`.
 - **Mouvement à inertie, physique stricte**, **simulé par chaque joueur**
-  (`_apply_forces`) : `velocity` (px/s, monde, vitesse du centre de masse) et
+  (`_apply_forces`) : `velocity` (px/s, espace, vitesse du centre de masse) et
   `angular_speed` (°/s) se conservent sans poussée (valeurs de départ en
   `@export`, nulles : immobile au début). Échelle : `PIXELS_PER_METER`
   (1 case = 1 m).
@@ -161,7 +181,7 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
     levier signé autour du centre de masse) / `get_moment_of_inertia` (modules =
     plaques). Le vaisseau tourne autour de son centre de masse (l'origine du
     nœud, centre de la grille, tourne autour de lui).
-  - Commandes `thrust_command` (direction voulue, repère du monde, longueur ≤ 1)
+  - Commandes `thrust_command` (direction voulue, repère de l'espace, longueur ≤ 1)
     et `turn_command` (−1 à 1, part du couple maximal dans ce sens,
     `get_max_angular_acceleration(sens)`). `_allocate_throttles` répartit entre
     les réacteurs (part 0 à 1 chacun) : visée = toute la poussée possible dans
@@ -174,11 +194,34 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
     et vitesses à tous (`_receive_motion`). Chaque machine calcule les forces
     avec l'alimentation qu'elle connaît. L'hôte
   corrige aussi position, orientation et vitesses toutes les `MOTION_SYNC_INTERVAL` s
-  (`_receive_position`), écart résorbé en douceur, ou d'un coup au-delà de
-  `CORRECTION_SNAP_DISTANCE` / `CORRECTION_SNAP_ANGLE`.
+  (`_receive_position`). Place reçue avancée du temps de trajet du message
+  (`_message_age` : moitié de l'aller-retour ENet), écart résorbé en douceur,
+  ou d'un coup au-delà de `CORRECTION_SNAP_DISTANCE` / `CORRECTION_SNAP_ANGLE`
+  (seuils agrandis du chemin parcouru en `CORRECTION_SNAP_TIME` s).
 - Les joueurs sont enfants de `Ship/Crew` : coordonnées dans le repère du vaisseau
   (qui tourne). La caméra du joueur tourne avec le vaisseau (`ignore_rotation`
   désactivé dans `player.tscn`) : le vaisseau reste droit à l'écran, l'espace tourne.
+- **Vaisseau ancré** (`anchored`, vrai pour `Ship` dans `main.tscn`, un seul,
+  `Ship.anchor`) : son nœud reste immobile à l'origine de la scène ; sa place
+  dans l'espace est `space_position` / `space_rotation` (pour les autres
+  vaisseaux, ces propriétés sont leur `position` / `rotation`). C'est l'espace
+  qui bouge : `Fleet` (repère de l'espace, parent des autres vaisseaux) est
+  placé à chaque image à l'inverse de `get_interpolated_space_transform()`
+  (interpolation faite à la main, coupée sur `Fleet`), et le fond étoilé en
+  tient compte. Raison : à grande vitesse (centaines de px par pas), un
+  vaisseau qui bouge dans la scène casse la physique de l'équipage (murs
+  restés en arrière), l'éclairage (lumière et ombres interpolées
+  différemment des salles) et la cible de la souris (vue interpolée, vaisseau
+  au pas physique). Ancré, rien de cela ne dépend plus de la vitesse
+  (vérifié hôte et client jusqu'à 10 000 km/h en tournant).
+  - **Toujours raisonner en espace** pour les vaisseaux : `space_position`,
+    `space_rotation`, `get_space_transform()` ; jamais `position`,
+    `global_position` ou `global_transform` d'un vaisseau pour la physique
+    entre vaisseaux, les commandes ou le réseau. Un saut :
+    `_reset_space_interpolation()`.
+  - Vaisseaux non ancrés qui bougent pendant un pas : `sync_physics_bodies()`
+    (place des corps transmise tout de suite au moteur physique). Pas
+    d'`Area2D` pour détecter les personnages d'un vaisseau (voir Portes).
 - **Interpolation physique** activée (`physics/common/physics_interpolation`) :
   sans elle, la rotation par pas physiques fait trembler l'image. Conséquences :
   - déplacer les nœuds en `_physics_process`, pas en `_process` ;
@@ -216,6 +259,18 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   le moment : vaisseau centré), annule sa
   rotation et dézoome de `ZOOM_FACTOR` (`_apply_camera`, tours entiers retirés
   avec `_turns`).
+- **Vue « coque »** pendant tout le mode (transitions comprises) : `Ship.hull_view`
+  (statique, local) fait dessiner chaque vaisseau en silhouette (salles avec
+  murs, tuyères `ModuleReacteur.get_nozzle_polygon`) par son nœud `Hull`,
+  texturée par `ship/shaders/hull_metal.gdshader` (`Ship.HULL_SHADER` : métal
+  gris brossé en plaques, dans le repère du vaisseau, détails trop fins
+  estompés selon le zoom), et les flammes (`draw_flame_on`) par son enfant
+  `Flames`. Tous deux non éclairés, donc hors brouillard ; salles et
+  `Structure` masquées.
+- **Statistiques** à gauche de l'écran pendant le mode (`_create_stats`,
+  `_update_stats`, marge `STATS_MARGIN`) : pour l'instant la vitesse du
+  vaisseau en km/h (`SPEED_TEXT`). Textes composés : `tr(...) % valeur`,
+  traduction automatique des labels coupée.
 - **Souris seulement** (le clavier ne pilote pas). Bouton gauche maintenu :
   direction centre de l'écran → souris (pas vaisseau → souris : la caméra vise
   devant le vaisseau et tournerait la cible avec lui), arrondie à
@@ -224,7 +279,8 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   avant. Bouton relâché : ni poussée ni rotation commandée, stabilisation
   (rotation annulée). Régulateur
   `_turn_command` : vitesse visée permettant de s'arrêter sur la cible
-  (`BRAKING_MARGIN`), rattrapée en `TURN_RESPONSE` s, arrondie à `TURN_STEP` ;
+  (`BRAKING_MARGIN`), rattrapée en `TURN_RESPONSE` s, arrondie en précision
+  relative (`TURN_STEPS_PER_DOUBLING`, rien sous `TURN_MIN_COMMAND`) ;
   accélérations propres à chaque sens (freinage avec le sens opposé à l'écart).
   Sans poussée, le vaisseau garde sa vitesse ; sans réacteur avant, freiner une
   marche avant demande de se retourner.
@@ -237,8 +293,10 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   son mouvement (inertie). Le mode reste accessible.
 
 ### Portes — `ship/door.gd`
-- S'ouvrent quand un `CharacterBody2D` entre dans leur zone, se referment
-  `open_duration` s après son départ. Décidées par l'hôte, appliquées par RPC.
+- S'ouvrent quand un `CharacterBody2D` de `Crew` entre dans leur zone, se
+  referment `open_duration` s après son départ. Décidées par l'hôte, appliquées
+  par RPC. Zone testée à la main à chaque pas (`_count_bodies_near`, repère du
+  vaisseau, `DETECTION_DEPTH` + rayon du personnage), pas par une `Area2D`.
 
 ### Réseau — `core/network.gd`, `player/player.gd`
 - ENet, 8 joueurs max. L'hôte (id 1) fait autorité sur le vaisseau, les portes et
@@ -280,7 +338,10 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
 - Le fond étoilé (`world/starfield.gd`) est sur un `CanvasLayer` à part pour rester visible.
   Le calque ne suit pas la vue tel quel (`follow_viewport_enabled` coupé au
   lancement) : avant chaque rendu (`frame_pre_draw`, `_follow_view`), il reprend
-  position et rotation de la vue, pas son zoom. Étoiles de taille et densité
+  la rotation de la vue dans l'espace, pas son zoom ; son centre avance du
+  déplacement de la vue dans l'espace (vue × inverse de la place interpolée
+  du vaisseau ancré) × le zoom (étoiles au même défilement que les vaisseaux, sans
+  glissement quand seul le zoom change). Étoiles de taille et densité
   constantes, nombre de tuiles constant (en suivant le zoom, le dézoom ×20
   redessinait des milliers de tuiles : ≈ 0,7 s par image).
 

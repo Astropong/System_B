@@ -12,7 +12,7 @@ extends Module
 
 const ACCENT := Color(1.0, 0.5, 0.15)
 ## Poussée à l'alimentation optimale (N).
-const MAX_THRUST := 20000.0
+const MAX_THRUST := 10000000.0
 ## Tuyère dessinée hors du mur : longueur et largeurs (cases).
 const NOZZLE_LENGTH := 1.5
 const NOZZLE_INNER_WIDTH := 4.0
@@ -125,31 +125,43 @@ func _nozzle_base() -> Vector2:
 	return base + outward * WALL_THICKNESS / 2.0
 
 
-## Tuyère évasée, hors de la salle, au milieu du mur [member nozzle_side].
-func _draw_nozzle(_rect: Rect2) -> void:
+## Contour de la tuyère évasée (repère du module), hors de la salle, au milieu
+## du mur [member nozzle_side]. Sert aussi à la coque (Ship, mode pilotage).
+func get_nozzle_polygon() -> PackedVector2Array:
 	var outward := -get_thrust_direction()
 	var along := Vector2(-outward.y, outward.x)
 	var base := _nozzle_base()
 	var tip := base + outward * NOZZLE_LENGTH * CELL_SIZE
 	var inner := along * NOZZLE_INNER_WIDTH * CELL_SIZE / 2.0
 	var outer := along * NOZZLE_OUTER_WIDTH * CELL_SIZE / 2.0
-	var shape := PackedVector2Array([base - inner, base + inner, tip + outer, tip - outer])
+	return PackedVector2Array([base - inner, base + inner, tip + outer, tip - outer])
+
+
+func _draw_nozzle(_rect: Rect2) -> void:
+	var shape := get_nozzle_polygon()
 	draw_colored_polygon(shape, NOZZLE_COLOR)
 	shape.append(shape[0])
 	draw_polyline(shape, ACCENT, FURNITURE_OUTLINE)
 
 
-## Flamme à la sortie de la tuyère, d'autant plus longue que flame_level est
-## grand, avec un léger vacillement.
 func _draw_flame() -> void:
+	draw_flame_on(_flame, Vector2.ZERO)
+
+
+## Dessine sur [param canvas] la flamme à la sortie de la tuyère (décalée de
+## [param offset]), d'autant plus longue que flame_level est grand, avec un
+## léger vacillement ; rien sous FLAME_MIN_LEVEL. Sert aussi à la coque.
+func draw_flame_on(canvas: CanvasItem, offset: Vector2) -> void:
+	if flame_level < FLAME_MIN_LEVEL:
+		return
 	var outward := -get_thrust_direction()
 	var along := Vector2(-outward.y, outward.x)
-	var start := _nozzle_base() + outward * NOZZLE_LENGTH * CELL_SIZE
+	var start := offset + _nozzle_base() + outward * NOZZLE_LENGTH * CELL_SIZE
 	var length := FLAME_LENGTH * CELL_SIZE * flame_level * randf_range(1.0 - FLAME_FLICKER, 1.0 + FLAME_FLICKER)
 	var half_width := NOZZLE_OUTER_WIDTH * CELL_SIZE / 2.0 * 0.85
-	_flame.draw_colored_polygon(PackedVector2Array([
+	canvas.draw_colored_polygon(PackedVector2Array([
 		start - along * half_width, start + along * half_width, start + outward * length,
 	]), FLAME_OUTER_COLOR)
-	_flame.draw_colored_polygon(PackedVector2Array([
+	canvas.draw_colored_polygon(PackedVector2Array([
 		start - along * half_width * 0.5, start + along * half_width * 0.5, start + outward * length * 0.6,
 	]), FLAME_INNER_COLOR)

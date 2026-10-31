@@ -21,6 +21,7 @@ const DEFAULT_ADDRESS := "127.0.0.1"
 
 @onready var _ship: Ship = $"../Ship"
 @onready var _crew: Node2D = $"../Ship/Crew"
+@onready var _fleet: Fleet = $"../Ships"
 @onready var _spawner: MultiplayerSpawner = $"../PlayerSpawner"
 @onready var _menu: Control = %Menu
 @onready var _host_button: Button = %HostButton
@@ -94,8 +95,15 @@ func _create_server() -> bool:
 	multiplayer.multiplayer_peer = peer
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
-	_ship.randomize_module_states()  # TEST : états aléatoires
+	_fleet.spawn_starting_ships()
+	for ship in _get_ships():
+		ship.randomize_module_states()  # TEST : états aléatoires
 	return true
+
+
+## Tous les vaisseaux de la partie : celui des joueurs et les autres.
+func _get_ships() -> Array[Node]:
+	return get_tree().get_nodes_in_group(Ship.GROUP)
 
 
 ## Rejoint une partie hébergée à l'adresse donnée.
@@ -138,12 +146,13 @@ func _set_buttons_disabled(disabled: bool) -> void:
 func _on_peer_connected(peer_id: int) -> void:
 	print("Joueur %d connecté." % peer_id)
 	_spawn_player(peer_id)
-	# État courant envoyé au nouveau venu : vaisseau, état des modules, portes
+	# État courant envoyé au nouveau venu : vaisseaux, état des modules, portes
 	# et personnages (ceux-ci ne sont transmis qu'à chaque changement d'ordre).
-	_ship.send_motion_to(peer_id)
-	_ship.send_module_states(peer_id)
-	_ship.send_module_controls(peer_id)
-	_ship.send_door_states(peer_id)
+	for ship: Ship in _get_ships():
+		ship.send_motion_to(peer_id)
+		ship.send_module_states(peer_id)
+		ship.send_module_controls(peer_id)
+		ship.send_door_states(peer_id)
 	for player in _crew.get_children():
 		if player is Player and player.name != str(peer_id):
 			player.send_state_to(peer_id)
@@ -151,7 +160,8 @@ func _on_peer_connected(peer_id: int) -> void:
 
 func _on_peer_disconnected(peer_id: int) -> void:
 	print("Joueur %d déconnecté." % peer_id)
-	_ship.release_controls_of(peer_id)
+	for ship: Ship in _get_ships():
+		ship.release_controls_of(peer_id)
 	var player := _crew.get_node_or_null(str(peer_id))
 	if player:
 		player.queue_free()

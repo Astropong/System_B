@@ -8,10 +8,14 @@ extends Node2D
 ## guerre ne l'atteigne pas.
 ##
 ## Le calque ne suit pas la caméra tel quel (follow_viewport désactivé) : à
-## chaque image, il reprend la position et la rotation de la vue, mais pas son
-## zoom. Les étoiles gardent ainsi la même taille et la même densité à l'écran
-## quel que soit le zoom (mode pilotage compris), avec un nombre de tuiles
-## constant ; elles défilent à la vitesse réelle du vaisseau dans le monde.
+## chaque image, il reprend la rotation de la vue, mais pas son zoom. Les
+## étoiles gardent ainsi la même taille et la même densité à l'écran quel que
+## soit le zoom (mode pilotage compris), avec un nombre de tuiles constant.
+## Elles sont dans leur propre plan, qui avance du déplacement de la vue
+## dans l'espace multiplié par le zoom : elles défilent à l'écran à la même
+## vitesse que les vaisseaux, et ne glissent pas quand seul le zoom change.
+## Espace : repère de Fleet ; la scène, elle, suit le vaisseau ancré (voir
+## Ship.anchored), dont la place interpolée relie les deux.
 
 @export var tile_size: float = 512.0:
 	set(value):
@@ -27,6 +31,10 @@ extends Node2D
 		queue_redraw()
 
 var _drawn_tiles: Rect2i
+# Centre de la vue dans le plan des étoiles, et dans le monde à l'image précédente.
+var _star_center := Vector2.ZERO
+var _last_world_center := Vector2.ZERO
+var _has_view: bool = false
 
 
 func _ready() -> void:
@@ -49,20 +57,33 @@ func _process(_delta: float) -> void:
 		_update_tiles(Vector2(576, 324), Vector2(2600, 1600))
 
 
-## Place le calque comme la vue du jeu, sans le zoom : le point du monde au
-## centre de l'écran reste au centre, avec la même orientation.
+## Place le calque comme la vue du jeu, sans le zoom : le centre de la vue
+## dans le plan des étoiles avance du déplacement de la vue dans le monde
+## multiplié par le zoom (même défilement à l'écran que le monde), avec la
+## même orientation.
 func _follow_view() -> void:
 	var layer := get_parent() as CanvasLayer
 	if layer == null:
 		return
 	var view := get_viewport().get_canvas_transform()
 	var screen_center := get_viewport_rect().size / 2.0
-	var world_center := view.affine_inverse() * screen_center
-	var rotation_only := Transform2D(view.get_rotation(), Vector2.ZERO)
-	layer.transform = Transform2D(view.get_rotation(), screen_center - rotation_only * world_center)
+	# Vue depuis l'espace : espace → scène (inverse de la place du vaisseau
+	# ancré), puis scène → écran.
+	var space := Ship.anchor.get_interpolated_space_transform() if Ship.anchor else Transform2D.IDENTITY
+	var space_view := view * space.affine_inverse()
+	var world_center := space_view.affine_inverse() * screen_center
+	var zoom := view.x.length()
+	if _has_view:
+		_star_center += (world_center - _last_world_center) * zoom
+	else:
+		_star_center = world_center * zoom
+		_has_view = true
+	_last_world_center = world_center
+	var angle := space_view.get_rotation()
+	layer.transform = Transform2D(angle, screen_center - Transform2D(angle, Vector2.ZERO) * _star_center)
 	# La vue peut être tournée : on couvre le disque circonscrit à l'écran.
 	var radius := screen_center.length()
-	_update_tiles(world_center, Vector2(radius, radius))
+	_update_tiles(_star_center, Vector2(radius, radius))
 
 
 func _update_tiles(center: Vector2, half: Vector2) -> void:

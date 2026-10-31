@@ -31,10 +31,30 @@ const CORRECTION_RATE := 2.0
 const CORRECTION_SNAP_DISTANCE := 96.0
 ## Au-delà de cet écart (degrés), l'orientation est corrigée d'un coup.
 const CORRECTION_SNAP_ANGLE := 10.0
+## Les deux seuils ci-dessus s'agrandissent de la distance (ou de l'angle)
+## parcourue en ce temps (s) à la vitesse actuelle : à grande vitesse, une
+## petite erreur sur le temps de trajet d'un message donne un grand écart.
+const CORRECTION_SNAP_TIME := 0.1
 ## Longueur minimale (cases) d'un mur partagé pour y placer une porte.
 const MIN_SHARED_WALL := 4
 ## Écart vertical (px) entre les joueurs à leur apparition (voir get_spawn_position).
 const SPAWN_SPACING := 64.0
+
+## Groupe de tous les vaisseaux de la partie (celui des joueurs et les autres),
+## pour les synchroniser ensemble (voir Network).
+const GROUP := &"ships"
+## Matière de la coque, dessinée à la place des salles en vue « coque » :
+## métal gris brossé en plaques (réglages dans le shader).
+const HULL_SHADER := preload("res://ship/shaders/hull_metal.gdshader")
+
+## Vue « coque » du joueur local (réglée par Piloting) : tous les vaisseaux
+## sont dessinés comme une silhouette en métal (HULL_SHADER : salles et
+## tuyères), avec les flammes des réacteurs, sans le brouillard de guerre, au
+## lieu de leurs salles.
+static var hull_view: bool = false
+
+## Le vaisseau ancré de la partie (voir anchored), ou null.
+static var anchor: Ship
 
 ## Échelle des forces : 1 case = 1 m (la taille du personnage).
 const PIXELS_PER_METER := Module.CELL_SIZE
@@ -46,7 +66,19 @@ const TORQUE_ARM_MIN := 0.01
 const TORQUE_WEIGHT := 1.0 / 20.0
 const ALLOCATION_SWEEPS := 20
 
-## Vitesse du centre de masse du vaisseau dans le monde (px/s). Réglée ici au
+## Vaisseau ancré (celui des joueurs, un seul par partie) : son nœud reste
+## immobile à l'origine de la scène, et c'est l'espace qui bouge autour de
+## lui (Fleet et ses vaisseaux, fond étoilé). Sa place dans l'espace est
+## alors gardée à part (space_position, space_rotation).
+## Pourquoi : à grande vitesse, un vaisseau qui bouge dans la scène déplace
+## ses murs, ses lumières et ses ombres de centaines de pixels par pas
+## physique. Ni le moteur physique (personnage qui bute sur des murs restés
+## en arrière) ni l'interpolation de l'image (ombres décalées, cible de la
+## souris fausse) ne suivent. Ancré, l'intérieur ne bouge plus, quelle que
+## soit la vitesse, et reste près de l'origine (précision des nombres).
+@export var anchored: bool = false
+
+## Vitesse du centre de masse du vaisseau dans l'espace (px/s). Réglée ici au
 ## départ, puis changée seulement par la poussée des réacteurs (inertie : sans
 ## poussée, le vaisseau la garde).
 @export var velocity := Vector2.ZERO
@@ -56,8 +88,30 @@ const ALLOCATION_SWEEPS := 20
 ## [member velocity].
 @export var angular_speed: float = 0.0
 
+## Place du vaisseau dans l'espace (repère de Fleet, px) : celle de son nœud,
+## ou, s'il est ancré, une valeur à part (son nœud ne bouge pas).
+var space_position: Vector2:
+	get:
+		return _space_position if anchored else position
+	set(value):
+		if anchored:
+			_space_position = value
+		else:
+			position = value
+
+## Orientation du vaisseau dans l'espace (radians), comme space_position.
+## Jamais repliée dans [-π, π] : un saut de 2π serait interpolé.
+var space_rotation: float:
+	get:
+		return _space_rotation if anchored else rotation
+	set(value):
+		if anchored:
+			_space_rotation = value
+		else:
+			rotation = value
+
 ## Commandes du pilote, décidées par l'hôte (voir request_controls) et
-## connues de tous : direction de poussée voulue, dans le repère du monde
+## connues de tous : direction de poussée voulue, dans le repère de l'espace
 ## (longueur 0 à 1)...
 var thrust_command := Vector2.ZERO
 ## ... et rotation voulue (-1 à 1, positif : sens horaire) : part de leur
@@ -72,11 +126,132 @@ var _rotation_error: float = 0.0  # radians
 # Joueur qui a envoyé les dernières commandes (hôte) : s'il part, elles sont
 # annulées (voir release_controls_of).
 var _pilot_id: int = 0
+# Silhouette de la vue « coque » (voir hull_view), et vue actuellement appliquée.
+var _hull: Node2D
+var _hull_flames: Node2D
+var _showing_hull: bool = false
+# Corps physiques générés (murs, portes), voir sync_physics_bodies.
+var _structure_bodies: Array[Node] = []
+# Vaisseau ancré : place dans l'espace, et celle du pas physique précédent
+# (interpolation de l'image, voir get_interpolated_space_transform).
+var _space_position := Vector2.ZERO
+var _space_rotation: float = 0.0
+var _previous_space_position := Vector2.ZERO
+var _previous_space_rotation: float = 0.0
 
 
 func _ready() -> void:
+	add_to_group(GROUP)
+	if not Engine.is_editor_hint():
+		_create_hull()
+		if anchored:
+			_anchor()
 	child_order_changed.connect(arrange_modules)
 	arrange_modules()
+
+
+func _exit_tree() -> void:
+	if anchor == self:
+		anchor = null
+
+
+## Ancre le vaisseau : la place de son nœud dans la scène devient sa place
+## dans l'espace, et le nœud revient à l'origine, où il restera.
+func _anchor() -> void:
+	_space_position = position
+	_space_rotation = rotation
+	_previous_space_position = _space_position
+	_previous_space_rotation = _space_rotation
+	position = Vector2.ZERO
+	rotation = 0.0
+	reset_physics_interpolation()
+	anchor = self
+
+
+## Place et orientation dans l'espace (repère de Fleet).
+func get_space_transform() -> Transform2D:
+	return Transform2D(space_rotation, space_position)
+
+
+## Place dans l'espace à l'image affichée : pour un vaisseau ancré, interpolée
+## entre les deux derniers pas physiques, comme le reste de l'image (Fleet et
+## le fond étoilé s'en servent pour placer l'espace autour de lui).
+func get_interpolated_space_transform() -> Transform2D:
+	if not anchored or not is_physics_interpolated_and_enabled():
+		return get_space_transform()
+	var weight := Engine.get_physics_interpolation_fraction()
+	return Transform2D(lerpf(_previous_space_rotation, _space_rotation, weight),
+			_previous_space_position.lerp(_space_position, weight))
+
+
+## Saut de position (correction d'un coup) : affiché tel quel, sans
+## interpolation depuis l'ancienne place.
+func _reset_space_interpolation() -> void:
+	if anchored:
+		_previous_space_position = _space_position
+		_previous_space_rotation = _space_rotation
+	else:
+		reset_physics_interpolation()
+
+
+func _process(_delta: float) -> void:
+	if _hull == null:
+		return
+	if hull_view != _showing_hull:
+		_show_hull(hull_view)
+	if _showing_hull:
+		_hull_flames.queue_redraw()  # flammes vacillantes
+
+
+# --- Vue « coque » ------------------------------------------------------------
+
+## Nœud de la silhouette, placé sous l'équipage, et nœud enfant des flammes
+## (sans la texture de métal). Tous deux non éclairés : le brouillard de
+## guerre (CanvasModulate) ne les assombrit pas.
+func _create_hull() -> void:
+	_hull = Node2D.new()
+	_hull.name = "Hull"
+	_hull.visible = false
+	var metal := ShaderMaterial.new()
+	metal.shader = HULL_SHADER
+	_hull.material = metal
+	_hull.draw.connect(_draw_hull)
+	add_child(_hull)
+	move_child(_hull, 0)
+
+	_hull_flames = Node2D.new()
+	_hull_flames.name = "Flames"
+	var unshaded := CanvasItemMaterial.new()
+	unshaded.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED
+	_hull_flames.material = unshaded
+	_hull_flames.draw.connect(_draw_hull_flames)
+	_hull.add_child(_hull_flames)
+
+
+## Montre la silhouette et masque salles, murs et portes, ou l'inverse.
+func _show_hull(shown: bool) -> void:
+	_showing_hull = shown
+	_hull.visible = shown
+	for m in get_modules():
+		m.visible = not shown
+	_get_structure().visible = not shown
+
+
+## Salles (murs compris) et tuyères, en blanc : la couleur vient du shader.
+func _draw_hull() -> void:
+	for m in get_modules():
+		_hull.draw_rect(Rect2(m.position, m.get_pixel_size()).grow(Module.WALL_THICKNESS / 2.0), Color.WHITE)
+		if m is ModuleReacteur:
+			var nozzle: PackedVector2Array = m.get_nozzle_polygon()
+			for i in nozzle.size():
+				nozzle[i] += m.position
+			_hull.draw_colored_polygon(nozzle, Color.WHITE)
+
+
+func _draw_hull_flames() -> void:
+	for m in get_modules():
+		if m is ModuleReacteur:
+			m.draw_flame_on(_hull_flames, m.position)
 
 
 ## Chaque machine applique les mêmes forces aux mêmes commandes (et à
@@ -84,6 +259,8 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
+	_previous_space_position = _space_position
+	_previous_space_rotation = _space_rotation
 	_apply_forces(delta)
 	if is_multiplayer_authority():
 		# Pilotage privé d'alimentation : plus aucune commande.
@@ -93,9 +270,28 @@ func _physics_process(delta: float) -> void:
 		_motion_timer += delta
 		if _motion_timer >= MOTION_SYNC_INTERVAL:
 			_motion_timer = 0.0
-			_receive_position.rpc(position, rotation, velocity, angular_speed)
+			_receive_position.rpc(space_position, space_rotation, velocity, angular_speed)
 	else:
 		_apply_correction(delta)
+	sync_physics_bodies()
+
+
+## Transmet tout de suite au moteur physique la nouvelle place des corps du
+## vaisseau (murs, portes, équipage), à appeler après chaque déplacement de
+## son nœud pendant un pas physique (vaisseau non ancré ; sans effet sur le
+## vaisseau ancré, dont le nœud ne bouge pas). Sinon Godot ne la transmet
+## qu'en fin de pas : un personnage à bord (traité après le vaisseau)
+## testerait son déplacement contre des murs restés à la place du pas
+## précédent. Ne suffit pas à grande vitesse (lumières, ombres) : voir anchored.
+func sync_physics_bodies() -> void:
+	for body in _structure_bodies:
+		if is_instance_valid(body):
+			body.force_update_transform()
+	var crew := get_node_or_null("Crew")
+	if crew:
+		for member in crew.get_children():
+			if member is CollisionObject2D:
+				member.force_update_transform()
 
 
 # --- Masse et forces ----------------------------------------------------------
@@ -198,7 +394,7 @@ func _allocate_throttles(reactors: Array[ModuleReacteur], wanted: Vector2, cente
 ## Règle aussi la flamme de chaque réacteur (sa part de poussée).
 func _apply_forces(delta: float) -> void:
 	var center := get_center_of_mass()
-	var wanted := thrust_command.rotated(-rotation)  # repère du vaisseau
+	var wanted := thrust_command.rotated(-space_rotation)  # repère du vaisseau
 	var reactors: Array[ModuleReacteur] = []
 	for m in get_modules():
 		if m is ModuleReacteur:
@@ -215,16 +411,29 @@ func _apply_forces(delta: float) -> void:
 	var mass := get_total_mass()
 	var inertia := get_moment_of_inertia()
 	if mass > 0.0:
-		velocity += (force / mass * PIXELS_PER_METER).rotated(rotation) * delta
+		velocity += (force / mass * PIXELS_PER_METER).rotated(space_rotation) * delta
 	if inertia > 0.0:
 		angular_speed += rad_to_deg(torque / inertia) * delta
-	# Le centre de masse avance à la vitesse du vaisseau ; l'origine du nœud
-	# tourne autour de lui.
-	var center_offset := center * PIXELS_PER_METER
-	var center_position := position + center_offset.rotated(rotation) + velocity * delta
-	# Angle non replié dans [-180°, 180°] : le saut de 360° serait interpolé.
-	rotation += deg_to_rad(angular_speed) * delta
-	position = center_position - center_offset.rotated(rotation)
+	space_position = _drift(space_position, space_rotation, velocity, angular_speed, delta).origin
+	space_rotation = _drift_rotation(space_rotation, angular_speed, delta)
+
+
+## Place après [param duration] s sans poussée, depuis [param from_position]
+## et [param from_rotation] (radians) : le centre de masse avance à la vitesse
+## [param speed] (px/s), et l'origine du vaisseau tourne autour de lui à
+## [param spin] (°/s).
+func _drift(from_position: Vector2, from_rotation: float, speed: Vector2, spin: float,
+		duration: float) -> Transform2D:
+	var center_offset := get_center_of_mass() * PIXELS_PER_METER
+	var center_position := from_position + center_offset.rotated(from_rotation) + speed * duration
+	var new_rotation := _drift_rotation(from_rotation, spin, duration)
+	return Transform2D(new_rotation, center_position - center_offset.rotated(new_rotation))
+
+
+## Orientation après [param duration] s à [param spin] °/s, non repliée
+## (Transform2D.get_rotation la replierait : saut de 2π interpolé).
+func _drift_rotation(from_rotation: float, spin: float, duration: float) -> float:
+	return from_rotation + deg_to_rad(spin) * duration
 
 
 ## Centre d'un module par rapport au centre du vaisseau (m).
@@ -236,7 +445,14 @@ func _module_offset(m: Module) -> Vector2:
 
 ## Envoie le mouvement du vaisseau à un joueur qui vient d'arriver (hôte).
 func send_motion_to(peer_id: int) -> void:
-	_receive_motion.rpc_id(peer_id, position, rotation, velocity, angular_speed, thrust_command, turn_command)
+	_receive_motion.rpc_id(peer_id, space_position, space_rotation, velocity, angular_speed, thrust_command, turn_command)
+
+
+## Envoie à tous l'état du mouvement et les commandes (hôte), de manière
+## fiable : après un changement de commandes ou un choc (ShipCollisions).
+func send_motion() -> void:
+	if is_inside_tree() and is_multiplayer_authority():
+		_receive_motion.rpc(space_position, space_rotation, velocity, angular_speed, thrust_command, turn_command)
 
 
 ## Change les commandes de poussée et de rotation et les envoie aux autres,
@@ -246,8 +462,7 @@ func set_controls(thrust: Vector2, turn: float) -> void:
 		return
 	thrust_command = thrust
 	turn_command = turn
-	if is_inside_tree() and is_multiplayer_authority():
-		_receive_motion.rpc(position, rotation, velocity, angular_speed, thrust_command, turn_command)
+	send_motion()
 
 
 ## Demande à l'hôte de changer les commandes (joueur aux commandes, voir
@@ -304,21 +519,40 @@ func _receive_position(new_position: Vector2, new_rotation: float, new_velocity:
 	_correct_to(new_position, new_rotation)
 
 
+## Écart à la place envoyée par l'hôte, résorbé en douceur ou d'un coup.
+## Le message a mis du temps à arriver : la place reçue est avancée de ce
+## temps (voir _message_age), sinon, à grande vitesse, le vaisseau serait
+## ramené en arrière à chaque correction. Le seuil du saut grandit avec la
+## vitesse (CORRECTION_SNAP_TIME) : l'estimation de ce temps reste imprécise.
 func _correct_to(new_position: Vector2, new_rotation: float) -> void:
+	var age := _message_age()
+	new_position = _drift(new_position, new_rotation, velocity, angular_speed, age).origin
+	new_rotation = _drift_rotation(new_rotation, angular_speed, age)
 	var snapped := false
-	_position_error = new_position - position
-	if _position_error.length() > CORRECTION_SNAP_DISTANCE:
-		position = new_position
+	_position_error = new_position - space_position
+	if _position_error.length() > CORRECTION_SNAP_DISTANCE + velocity.length() * CORRECTION_SNAP_TIME:
+		space_position = new_position
 		_position_error = Vector2.ZERO
 		snapped = true
-	_rotation_error = angle_difference(rotation, new_rotation)
-	if absf(_rotation_error) > deg_to_rad(CORRECTION_SNAP_ANGLE):
-		rotation = new_rotation
+	_rotation_error = angle_difference(space_rotation, new_rotation)
+	if absf(_rotation_error) > deg_to_rad(CORRECTION_SNAP_ANGLE + absf(angular_speed) * CORRECTION_SNAP_TIME):
+		space_rotation = new_rotation
 		_rotation_error = 0.0
 		snapped = true
-	# Saut : à afficher tel quel, sans interpolation depuis l'ancienne position.
 	if snapped:
-		reset_physics_interpolation()
+		_reset_space_interpolation()
+
+
+## Temps (s) mis par un message de l'hôte pour arriver : moitié du temps
+## d'aller-retour mesuré par ENet (0 sans connexion ENet).
+func _message_age() -> float:
+	var peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if peer == null or multiplayer.is_server():
+		return 0.0
+	var host := peer.get_peer(1)
+	if host == null:
+		return 0.0
+	return host.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME) / 2000.0
 
 
 func _apply_correction(delta: float) -> void:
@@ -326,13 +560,13 @@ func _apply_correction(delta: float) -> void:
 		var step := _position_error * minf(1.0, CORRECTION_RATE * delta)
 		if step.length() < 0.01:
 			step = _position_error
-		position += step
+		space_position += step
 		_position_error -= step
 	if _rotation_error != 0.0:
 		var turn := _rotation_error * minf(1.0, CORRECTION_RATE * delta)
 		if absf(turn) < 0.00001:
 			turn = _rotation_error
-		rotation += turn
+		space_rotation += turn
 		_rotation_error -= turn
 
 
@@ -457,6 +691,8 @@ func arrange_modules() -> void:
 	var origin := -Vector2(bounds.position) * Module.CELL_SIZE - Vector2(bounds.size) * Module.CELL_SIZE / 2.0
 	for m in modules:
 		m.position = origin + Vector2(m.grid_position) * Module.CELL_SIZE
+		if _showing_hull:
+			m.visible = false
 		m.doorways = []
 		m.neighbors = []
 
@@ -468,6 +704,9 @@ func arrange_modules() -> void:
 				doors.append(door)
 
 	_build_structure(modules, doors)
+	_structure_bodies = _get_structure().find_children("*", "CollisionObject2D", true, false)
+	if _hull:
+		_hull.queue_redraw()
 	_arranging = false
 
 

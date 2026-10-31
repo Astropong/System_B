@@ -8,6 +8,13 @@ extends Node2D
 ##
 ## Multijoueur : seul l'hôte décide d'ouvrir ou de fermer, puis applique
 ## le changement chez tous les joueurs (RPC _apply_state).
+##
+## Détection (hôte, à chaque pas physique, _count_bodies_near) : position des
+## personnages de l'équipage comparée à la zone de la porte, dans le repère du
+## vaisseau. Pas d'Area2D : dans le moteur physique, un personnage ne prend sa
+## nouvelle place qu'après le test des zones ; dans un vaisseau rapide, la
+## zone le verrait là où il était au pas précédent (vitesse × durée du pas en
+## arrière) et la porte ne s'ouvrirait plus.
 
 ## Temps (s) pendant lequel la porte reste ouverte après le passage.
 @export var open_duration: float = 3.0
@@ -55,17 +62,6 @@ func _ready() -> void:
 	_occluder.occluder = poly
 	add_child(_occluder)
 
-	# Zone de détection des personnages, de part et d'autre de la porte.
-	var area := Area2D.new()
-	var area_shape := CollisionShape2D.new()
-	var area_rect := RectangleShape2D.new()
-	area_rect.size = Vector2(DETECTION_DEPTH * 2.0, length)
-	area_shape.shape = area_rect
-	area.add_child(area_shape)
-	add_child(area)
-	area.body_entered.connect(_on_body_entered)
-	area.body_exited.connect(_on_body_exited)
-
 	_timer = Timer.new()
 	_timer.one_shot = true
 	add_child(_timer)
@@ -106,22 +102,37 @@ func _animate_to(value: float) -> void:
 	_tween.tween_property(self, "_amount", value, ANIMATION_TIME)
 
 
-func _on_body_entered(body: Node2D) -> void:
-	if not multiplayer.is_server():
+## Hôte : ouvre dès qu'un personnage arrive dans la zone, lance la fermeture
+## différée quand le dernier en sort.
+func _physics_process(_delta: float) -> void:
+	if Engine.is_editor_hint() or not multiplayer.is_server():
 		return
-	if body is CharacterBody2D:
-		_bodies_near += 1
+	var near := _count_bodies_near()
+	if near > 0 and _bodies_near == 0:
 		_timer.stop()
 		open()
+	elif near == 0 and _bodies_near > 0:
+		_timer.start(open_duration)
+	_bodies_near = near
 
 
-func _on_body_exited(body: Node2D) -> void:
-	if not multiplayer.is_server():
-		return
-	if body is CharacterBody2D:
-		_bodies_near = maxi(_bodies_near - 1, 0)
-		if _bodies_near == 0:
-			_timer.start(open_duration)
+## Personnages (enfants de Crew dans le vaisseau) qui touchent la zone de
+## détection : DETECTION_DEPTH de chaque côté de la porte, sur sa longueur,
+## agrandie du rayon du personnage.
+func _count_bodies_near() -> int:
+	var ship := get_parent().get_parent() if get_parent() else null
+	var crew := ship.get_node_or_null("Crew") if ship else null
+	if crew == null:
+		return 0
+	var zone := Rect2(-DETECTION_DEPTH, -length / 2.0, DETECTION_DEPTH * 2.0, length)
+	var inverse := transform.affine_inverse()  # repère du vaisseau → porte
+	var count := 0
+	for body in crew.get_children():
+		if body is CharacterBody2D:
+			var reach: float = body.radius if body is Player else 0.0
+			if zone.grow(reach).has_point(inverse * body.position):
+				count += 1
+	return count
 
 
 func _on_timer_timeout() -> void:
