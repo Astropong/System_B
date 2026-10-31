@@ -132,8 +132,11 @@ var _pilot_id: int = 0
 var _hull: Node2D
 var _hull_flames: Node2D
 var _showing_hull: bool = false
-# Corps physiques générés (murs, portes), voir sync_physics_bodies.
-var _structure_bodies: Array[Node] = []
+# Physique de l'équipage (voir get_crew_space) : espace, corps des murs et
+# leurs formes.
+var _crew_space := RID()
+var _walls_body := RID()
+var _wall_shapes: Array[RID] = []
 # Vaisseau ancré : place dans l'espace, et celle du pas physique précédent
 # (interpolation de l'image, voir get_interpolated_space_transform).
 var _space_position := Vector2.ZERO
@@ -161,6 +164,7 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if anchor == self:
 		anchor = null
+	_free_crew_space()
 
 
 ## Ancre ce vaisseau à la place du précédent (le joueur local monte à bord,
@@ -308,25 +312,61 @@ func _physics_process(delta: float) -> void:
 			_receive_position.rpc(space_position, space_rotation, velocity, angular_speed)
 	else:
 		_apply_correction(delta)
-	sync_physics_bodies()
 
 
-## Transmet tout de suite au moteur physique la nouvelle place des corps du
-## vaisseau (murs, portes, équipage), à appeler après chaque déplacement de
-## son nœud pendant un pas physique (vaisseau non ancré ; sans effet sur le
-## vaisseau ancré, dont le nœud ne bouge pas). Sinon Godot ne la transmet
-## qu'en fin de pas : un personnage à bord (traité après le vaisseau)
-## testerait son déplacement contre des murs restés à la place du pas
-## précédent. Ne suffit pas à grande vitesse (lumières, ombres) : voir anchored.
-func sync_physics_bodies() -> void:
-	for body in _structure_bodies:
-		if is_instance_valid(body):
-			body.force_update_transform()
-	var crew := get_node_or_null("Crew")
-	if crew:
-		for member in crew.get_children():
-			if member is CollisionObject2D:
-				member.force_update_transform()
+# --- Physique de l'équipage ---------------------------------------------------
+
+## Espace physique propre au vaisseau, où se déplace son équipage : murs
+## (_add_crew_wall), battants des portes (Door) et personnages (Player), tous
+## en coordonnées du vaisseau, donc immobiles quels que soient sa place dans
+## la scène, sa vitesse et sa rotation. Le monde de Godot ne contient aucun
+## mur : un vaisseau rapide y déplacerait ses murs de centaines de pixels par
+## pas, et le moteur physique ne suivrait pas (murs restés en arrière, zones
+## en retard d'un pas). Créé à la première demande (pas dans l'éditeur).
+## Espace jamais simulé (inactif) : il ne sert qu'aux tests de déplacement
+## (PhysicsServer2D.body_test_motion), et tous ses corps sont statiques,
+## placés directement.
+func get_crew_space() -> RID:
+	if not _crew_space.is_valid():
+		_crew_space = PhysicsServer2D.space_create()
+		_walls_body = PhysicsServer2D.body_create()
+		PhysicsServer2D.body_set_mode(_walls_body, PhysicsServer2D.BODY_MODE_STATIC)
+		PhysicsServer2D.body_set_space(_walls_body, _crew_space)
+	return _crew_space
+
+
+## Ajoute aux murs de l'équipage un rectangle de taille [param size] (px)
+## centré sur [param center] (repère du vaisseau).
+func _add_crew_wall(size: Vector2, center: Vector2) -> void:
+	if Engine.is_editor_hint():
+		return
+	get_crew_space()
+	var shape := PhysicsServer2D.rectangle_shape_create()
+	PhysicsServer2D.shape_set_data(shape, size / 2.0)
+	PhysicsServer2D.body_add_shape(_walls_body, shape, Transform2D(0.0, center))
+	_wall_shapes.append(shape)
+
+
+func _clear_crew_walls() -> void:
+	if not _walls_body.is_valid():
+		return
+	PhysicsServer2D.body_clear_shapes(_walls_body)
+	for shape in _wall_shapes:
+		PhysicsServer2D.free_rid(shape)
+	_wall_shapes.clear()
+
+
+## Espace libéré à la sortie de l'arbre, qui vient après celle des enfants
+## (portes, personnages : leurs corps l'ont déjà quitté). Pas à la
+## destruction : elle précède la sortie de l'arbre des enfants.
+func _free_crew_space() -> void:
+	if not _crew_space.is_valid():
+		return
+	_clear_crew_walls()
+	PhysicsServer2D.free_rid(_walls_body)
+	PhysicsServer2D.free_rid(_crew_space)
+	_walls_body = RID()
+	_crew_space = RID()
 
 
 # --- Masse et forces ----------------------------------------------------------
@@ -739,7 +779,6 @@ func arrange_modules() -> void:
 				doors.append(door)
 
 	_build_structure(modules, doors)
-	_structure_bodies = _get_structure().find_children("*", "CollisionObject2D", true, false)
 	if _hull:
 		_hull.queue_redraw()
 	_arranging = false
@@ -808,20 +847,14 @@ func _build_structure(modules: Array[Module], doors: Array) -> void:
 		structure.remove_child(child)
 		child.queue_free()
 
-	var walls := StaticBody2D.new()
-	walls.name = "Walls"
-	structure.add_child(walls)
+	_clear_crew_walls()
 	for line in _merge_wall_lines(modules):
 		var a: Vector2 = line[0]
 		var b: Vector2 = line[1]
-		var shape := RectangleShape2D.new()
-		shape.size = Vector2(
+		var size := Vector2(
 				maxf(absf(b.x - a.x), Module.WALL_THICKNESS),
 				maxf(absf(b.y - a.y), Module.WALL_THICKNESS))
-		var collision := CollisionShape2D.new()
-		collision.shape = shape
-		collision.position = (a + b) / 2.0
-		walls.add_child(collision)
+		_add_crew_wall(size, (a + b) / 2.0)
 
 		var occluder := LightOccluder2D.new()
 		var poly := OccluderPolygon2D.new()

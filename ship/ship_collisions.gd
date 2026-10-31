@@ -188,8 +188,6 @@ func _resolve(a: Ship, b: Ship, contact: Dictionary) -> void:
 		var share_a := mass_b / (mass_a + mass_b)
 		a.space_position -= n * push * share_a
 		b.space_position += n * push * (1.0 - share_a)
-		a.sync_physics_bodies()
-		b.sync_physics_bodies()
 
 	if closing_speed > 0.0:
 		a.send_motion()

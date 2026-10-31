@@ -1,5 +1,5 @@
 class_name Player
-extends CharacterBody2D
+extends Node2D
 ## Personnage vu de dessus, dessiné comme un rond.
 ## - Flèches, ZQSD ou WASD (actions move_*, project.godot) : déplacement direct.
 ## - Bouton gauche maintenu : le personnage se rend vers la souris ; il
@@ -11,6 +11,12 @@ extends CharacterBody2D
 ## sa cible sont exprimées dans le repère du vaisseau.
 ## La caméra tourne avec le vaisseau (ignore_rotation désactivé) : le vaisseau
 ## reste droit à l'écran, c'est l'espace autour qui tourne.
+##
+## Collisions : un corps circulaire (rayon radius) dans l'espace physique de
+## l'équipage de son vaisseau (Ship.get_crew_space, repère du vaisseau), où il
+## glisse contre les murs, les portes fermées et les autres personnages
+## (_move). Le déplacement ne dépend donc ni de la place du vaisseau dans la
+## scène ni de sa vitesse, sur toutes les machines.
 ##
 ## Multijoueur : le nom du nœud est l'identifiant réseau du joueur, qui fait
 ## autorité sur son personnage. Seul le personnage local lit les commandes et
@@ -50,6 +56,8 @@ const CORRECTION_INTERVAL := 0.5
 const CORRECTION_RATE := 10.0
 ## Au-delà de cet écart (px), la position est corrigée d'un coup.
 const CORRECTION_SNAP_DISTANCE := 96.0
+## Glissements successifs au plus par pas (coin : deux murs).
+const MAX_SLIDES := 4
 
 var target: Vector2  # dans le repère du vaisseau
 var has_target: bool = false
@@ -68,13 +76,77 @@ var _time_since_correction: float = 0.0
 # Écart restant à résorber (autres joueurs).
 var _position_error := Vector2.ZERO
 
+# Corps dans l'espace de l'équipage du vaisseau, et paramètres des tests de
+# déplacement (réutilisés).
+var _body := RID()
+var _shape := RID()
+var _motion := PhysicsTestMotionParameters2D.new()
+var _motion_result := PhysicsTestMotionResult2D.new()
+
 static var _local: Player
 
 
+## Entrée dans un vaisseau (création ou changement) : son corps rejoint
+## l'espace de l'équipage de ce vaisseau.
 func _enter_tree() -> void:
 	var peer_id := name.to_int()
 	if peer_id > 0:
 		set_multiplayer_authority(peer_id)
+	var ship := get_ship()
+	if ship == null:
+		return
+	if not _body.is_valid():
+		_shape = PhysicsServer2D.circle_shape_create()
+		PhysicsServer2D.shape_set_data(_shape, radius)
+		_body = PhysicsServer2D.body_create()
+		PhysicsServer2D.body_set_mode(_body, PhysicsServer2D.BODY_MODE_STATIC)
+		PhysicsServer2D.body_add_shape(_body, _shape)
+	PhysicsServer2D.body_set_space(_body, ship.get_crew_space())
+	_place_body()
+
+
+## Hors de l'arbre, le corps quitte l'espace (le vaisseau peut le libérer).
+func _exit_tree() -> void:
+	if _body.is_valid():
+		PhysicsServer2D.body_set_space(_body, RID())
+
+
+## Destruction : vient avant la sortie de l'arbre (_exit_tree ne doit plus
+## toucher au corps libéré).
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and _body.is_valid():
+		PhysicsServer2D.free_rid(_body)
+		PhysicsServer2D.free_rid(_shape)
+		_body = RID()
+		_shape = RID()
+
+
+## Corps placé à la position du personnage (les autres le heurtent là).
+func _place_body() -> void:
+	PhysicsServer2D.body_set_state(_body, PhysicsServer2D.BODY_STATE_TRANSFORM, Transform2D(0.0, position))
+
+
+## Déplace le personnage de [param wanted] × [param delta] (repère du
+## vaisseau) en glissant contre ce qu'il heurte ; renvoie la vitesse après
+## glissement (l'élan ne traverse pas un mur).
+func _move(wanted: Vector2, delta: float) -> Vector2:
+	var from := Transform2D(0.0, position)
+	var motion := wanted * delta
+	var result_velocity := wanted
+	for i in MAX_SLIDES:
+		_motion.from = from
+		_motion.motion = motion
+		if not PhysicsServer2D.body_test_motion(_body, _motion, _motion_result):
+			from.origin += motion
+			break
+		from.origin += _motion_result.get_travel()
+		var normal := _motion_result.get_collision_normal()
+		motion = _motion_result.get_remainder().slide(normal)
+		result_velocity = result_velocity.slide(normal)
+		if motion.is_zero_approx():
+			break
+	position = from.origin
+	return result_velocity
 
 
 ## Personnage du joueur local, ou null (pas encore créé, serveur dédié).
@@ -99,6 +171,7 @@ func transfer_to(ship: Ship, at: Vector2) -> void:
 	input_dir = Vector2.ZERO
 	move_velocity = Vector2.ZERO
 	_position_error = Vector2.ZERO
+	_place_body()
 	reset_physics_interpolation()
 	if is_multiplayer_authority():
 		ship.make_anchor()
@@ -125,17 +198,17 @@ func _physics_process(delta: float) -> void:
 	if is_local:
 		_read_input()
 
-	velocity = _compute_velocity(delta)
-	move_and_slide()
+	var slid := _move(_compute_velocity(delta), delta)
 	# Vitesse après glissement contre les murs : l'élan ne traverse pas un mur.
 	if move_velocity != Vector2.ZERO:
-		move_velocity = velocity.rotated(-_get_ship_rotation())
+		move_velocity = slid
 
 	if is_local:
 		_send_updates(delta)
 		queue_redraw()
 	else:
 		_apply_correction(delta)
+	_place_body()
 
 
 func _read_input() -> void:
@@ -160,14 +233,11 @@ func _read_input() -> void:
 
 
 ## Vitesse selon l'ordre en cours ; identique sur toutes les machines.
-## Les ordres (direction des flèches, cible) sont dans le repère du vaisseau,
-## qui est aussi celui de l'écran puisque la caméra tourne avec lui ;
-## move_and_slide applique la vitesse dans le repère du monde : on la tourne
-## donc de l'orientation du vaisseau (synchronisée entre les joueurs).
+## Tout est dans le repère du vaisseau (ordres, position, vitesse renvoyée),
+## qui est aussi celui de l'écran puisque la caméra tourne avec lui.
 ## Inertie : move_velocity rejoint la vitesse voulue à ACCELERATION près ; vers
 ## une cible, la vitesse voulue baisse assez tôt pour s'arrêter dessus.
 func _compute_velocity(delta: float) -> Vector2:
-	var ship_rotation := _get_ship_rotation()
 	var wanted := Vector2.ZERO
 	if input_dir != Vector2.ZERO:
 		wanted = input_dir * speed
@@ -178,16 +248,10 @@ func _compute_velocity(delta: float) -> Vector2:
 			# Dernier petit pas pile sur la cible.
 			has_target = false
 			move_velocity = Vector2.ZERO
-			return (to_target / delta).rotated(ship_rotation)
+			return to_target / delta
 		wanted = to_target / distance * minf(speed, sqrt(2.0 * ACCELERATION * distance))
 	move_velocity = move_velocity.move_toward(wanted, ACCELERATION * delta)
-	return move_velocity.rotated(ship_rotation)
-
-
-## Orientation (radians) du repère du personnage, c'est-à-dire du vaisseau.
-func _get_ship_rotation() -> float:
-	var parent := get_parent() as Node2D
-	return parent.global_rotation if parent else 0.0
+	return move_velocity
 
 
 ## Joueur local : envoie l'ordre quand il change (dont l'arrêt), et des

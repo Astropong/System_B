@@ -173,8 +173,18 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   états après un choc ; les autres machines voient un court chevauchement.
 - Deux modules qui partagent au moins `MIN_SHARED_WALL` cases de mur sont voisins,
   avec une porte au milieu de la partie commune (verticale ou pivotée de 90°).
-- Le nœud `Structure` (généré, non sauvegardé) contient les collisions des murs, les
+- Le nœud `Structure` (généré, non sauvegardé) contient les
   `LightOccluder2D` (murs fusionnés par droite : `_merge_wall_lines`) et les `Door`.
+- **Physique de l'équipage par vaisseau** (`Ship.get_crew_space`) : chaque
+  vaisseau a son propre espace `PhysicsServer2D` (jamais simulé, seulement
+  des tests de déplacement), où murs (`_add_crew_wall`), battants des portes
+  et personnages sont des corps statiques en coordonnées du vaisseau. Le monde
+  de Godot ne contient aucun mur : le déplacement de l'équipage ne dépend ni
+  de la place du vaisseau dans la scène, ni de sa vitesse, ni de l'ancrage,
+  sur aucune machine (l'hôte simule correctement les personnages des autres
+  vaisseaux). Les corps quittent l'espace dans `_exit_tree` ; le vaisseau le
+  libère dans le sien (après ses enfants), pas à la destruction
+  (`NOTIFICATION_PREDELETE` précède la sortie de l'arbre des enfants).
 - **Mouvement à inertie, physique stricte**, **simulé par chaque joueur**
   (`_apply_forces`) : `velocity` (px/s, espace, vitesse du centre de masse) et
   `angular_speed` (°/s) se conservent sans poussée (valeurs de départ en
@@ -227,9 +237,9 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
     `global_position` ou `global_transform` d'un vaisseau pour la physique
     entre vaisseaux, les commandes ou le réseau. Un saut :
     `_reset_space_interpolation()`.
-  - Vaisseaux non ancrés qui bougent pendant un pas : `sync_physics_bodies()`
-    (place des corps transmise tout de suite au moteur physique). Pas
-    d'`Area2D` pour détecter les personnages d'un vaisseau (voir Portes).
+  - Rien de physique dans le monde pour l'intérieur d'un vaisseau (ni corps
+    ni `Area2D`) : utiliser l'espace de l'équipage ou des tests dans le
+    repère du vaisseau (voir Physique de l'équipage, Portes).
 - **Interpolation physique** activée (`physics/common/physics_interpolation`) :
   sans elle, la rotation par pas physiques fait trembler l'image. Conséquences :
   - déplacer les nœuds en `_physics_process`, pas en `_process` ;
@@ -301,10 +311,11 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   son mouvement (inertie). Le mode reste accessible.
 
 ### Portes — `ship/door.gd`
-- S'ouvrent quand un `CharacterBody2D` de `Crew` entre dans leur zone, se
+- S'ouvrent quand un `Player` de `Crew` entre dans leur zone, se
   referment `open_duration` s après son départ. Décidées par l'hôte, appliquées
   par RPC. Zone testée à la main à chaque pas (`_count_bodies_near`, repère du
   vaisseau, `DETECTION_DEPTH` + rayon du personnage), pas par une `Area2D`.
+  Battant : forme dans l'espace de l'équipage, désactivée porte ouverte.
 
 ### Réseau — `core/network.gd`, `player/player.gd`
 - ENet, 8 joueurs max. L'hôte (id 1) fait autorité sur le vaisseau, les portes et
@@ -328,17 +339,18 @@ Après un déplacement, vérifier les chemins `res://` écrits dans les scripts
   gauche maintenu : aller vers la souris, arrêt au relâchement.
 - Légère inertie : `Player.move_velocity` (repère du vaisseau) rejoint la vitesse
   voulue à `ACCELERATION` près ; vers une cible, la vitesse voulue baisse pour
-  s'arrêter dessus. Reprise de la vitesse après `move_and_slide` (glissement
-  contre les murs). Elle part avec chaque ordre (`_receive_order`,
+  s'arrêter dessus. Reprise de la vitesse après glissement contre les murs
+  (`Player._move` : `PhysicsServer2D.body_test_motion` dans l'espace de
+  l'équipage, `MAX_SLIDES` glissements ; `Player` est un `Node2D`, pas un
+  `CharacterBody2D`). Elle part avec chaque ordre (`_receive_order`,
   `_receive_state_from_host`).
 - **Pas de `MultiplayerSynchronizer`** : un joueur envoie ses **ordres** (direction
   clavier, cible souris) quand ils changent, avec sa position de départ ; chaque
   machine simule le déplacement. Position finale à l'arrêt, correction toutes les
   `CORRECTION_INTERVAL` s pendant un déplacement.
   - `Player._compute_velocity` doit rester **identique sur toutes les machines**.
-    Les ordres (flèches, cible souris) sont dans le repère du vaisseau, qui est
-    celui de l'écran ; la vitesse renvoyée est tournée de l'orientation du
-    vaisseau (`_get_ship_rotation`), car `move_and_slide` agit dans le repère du monde.
+    Tout y est dans le repère du vaisseau (ordres, position, vitesse), qui
+    est celui de l'écran.
 - **Joueur qui arrive** : `Network._on_peer_connected` lui envoie les personnages
   existants (avant le sien), puis l'état des vaisseaux,
   l'état des modules, leurs commandes (`Ship.send_module_controls`), les portes et
